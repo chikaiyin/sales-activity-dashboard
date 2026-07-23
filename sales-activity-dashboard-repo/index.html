@@ -46,6 +46,17 @@
   }
   .range-tab:hover { background: #f3f4f6; }
   .range-tab.active { background: #1e3a8a; border-color: #1e3a8a; color: #fff; }
+
+  .custom-date-picker { display: flex; align-items: center; gap: 8px; margin-left: 10px; }
+  .custom-date-picker input[type="date"] {
+    border: 1px solid #d1d5db; border-radius: 8px; padding: 5px 10px;
+    font-size: 12.5px; font-weight: 600; color: #374151; background: #fff; cursor: pointer;
+  }
+  .custom-date-picker input[type="date"]:hover { background: #f9fafb; }
+  .custom-date-picker.active input[type="date"] { border-color: #1e3a8a; color: #1e3a8a; }
+  .range-toggle-label { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: #6b7280; cursor: pointer; user-select: none; }
+  .range-toggle-label input[type="checkbox"] { cursor: pointer; }
+  #customRangeToField { display: flex; align-items: center; gap: 8px; }
   .view-tab.active { background: #0d9488; border-color: #0d9488; color: #fff; }
 
   .rep-filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -98,6 +109,17 @@
 
   .caveat { font-size: 11px; color: #b45309; margin-top: 10px; }
   .note { font-size: 11px; color: #9ca3af; margin-top: 10px; }
+
+  /* Collapsible version of .caveat — same color/size, but the long
+     explanatory notes (Booked vs Hosted definitions, per-rep reconciliation
+     write-ups) start closed with just a one-line summary, since the full
+     text is genuinely long and shouldn't always be sitting on screen. */
+  .caveat-details { font-size: 11px; color: #b45309; margin-top: 10px; }
+  .caveat-details summary { cursor: pointer; font-weight: 600; list-style: none; }
+  .caveat-details summary::-webkit-details-marker { display: none; }
+  .caveat-details summary::before { content: '▸ '; }
+  .caveat-details[open] summary::before { content: '▾ '; }
+  .caveat-details .caveat-body { margin-top: 6px; }
   footer { margin-top: 18px; color: #9ca3af; font-size: 11px; }
 
   .loading-bar { height: 3px; border-radius: 2px; overflow: hidden; background: #eef0f2; margin-bottom: 14px; display: none; }
@@ -135,6 +157,16 @@
   #activityLogTable td, #activityLogTable th { white-space: nowrap; }
   #activityLogTable td:last-child { white-space: normal; }
   .type-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+  .contact-link { color: #1e3a8a; font-weight: 600; text-decoration: none; white-space: nowrap; cursor: pointer; border-bottom: 1px dashed #1e3a8a; }
+  .contact-link:hover { background: #eff4ff; }
+
+  #copyToast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(8px);
+    background: #1f2328; color: #fff; padding: 9px 16px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 600; opacity: 0; pointer-events: none;
+    transition: opacity .15s, transform .15s; z-index: 1000; box-shadow: 0 4px 14px rgba(0,0,0,.2);
+  }
+  #copyToast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   .hidden { display: none !important; }
 </style>
@@ -161,6 +193,17 @@
       <button class="range-tab" data-range="last14">Last 14 Days</button>
       <button class="range-tab" data-range="month">This Month</button>
       <button class="range-tab" data-range="lastMonth">Last Month</button>
+    </div>
+    <div class="custom-date-picker" id="customDatePickerWrap">
+      <span class="rep-filter-label">Or pick a day:</span>
+      <input type="date" id="customDatePicker" />
+      <label class="range-toggle-label">
+        <input type="checkbox" id="customRangeToggle" /> range
+      </label>
+      <span id="customRangeToField" class="hidden">
+        <span class="rep-filter-label">to:</span>
+        <input type="date" id="customDatePickerEnd" />
+      </span>
     </div>
   </div>
 
@@ -199,7 +242,10 @@
 
     <div class="subhead">Meetings — Booked vs. Hosted (Lifetime)</div>
     <div class="kpi-grid" id="qualifiedKpiGrid"></div>
-    <div class="caveat" style="margin-top:8px;">📋 Number looking low for this rep? HubSpot sometimes drops a Meeting record on cancel/reschedule, even though the appointment really happened — ask Claude: "run the HubSpot reconciliation for [rep name]." It cross-checks Meeting records against booking-confirmation emails to recover the ones HubSpot lost. (Not automatic — has to be asked for, since it takes a bunch of manual lookups per rep.)</div>
+    <details class="caveat-details" style="margin-top:8px;">
+      <summary>📋 Number looking low for this rep?</summary>
+      <div class="caveat-body">HubSpot sometimes drops a Meeting record on cancel/reschedule, even though the appointment really happened — ask Claude: "run the HubSpot reconciliation for [rep name]." It cross-checks Meeting records against booking-confirmation emails to recover the ones HubSpot lost. (Not automatic — has to be asked for, since it takes a bunch of manual lookups per rep.)</div>
+    </details>
 
     <div class="subhead">Book Health — Contacted vs. Untouched (Lifetime)</div>
     <div class="kpi-grid" id="bookHealthKpiGrid"></div>
@@ -241,6 +287,7 @@
 
   <div class="panel" id="activityLogPanel">
     <div class="panel-title-row"><div class="panel-title">Activity Log</div></div>
+    <div class="rep-filter-row" id="activityTypeFilterRow" style="margin-bottom:10px;"></div>
     <div class="panel-sub" id="activityLogSub"></div>
     <div class="log-scroll">
       <table class="compare" id="activityLogTable">
@@ -251,6 +298,10 @@
       </table>
     </div>
     <div class="note" id="activityLogNote"></div>
+    <details class="caveat-details" style="margin-top:6px;">
+      <summary>📋 About the contact links</summary>
+      <div class="caveat-body">Calls and New Leads link straight from the contact's name in the text (e.g. the "FUJIFILM" in "Call with FUJIFILM"). Emails/Meetings/Notes add a separate "View contact ↗" instead, since their text doesn't reliably contain just the contact's name. New Lead and Enquiry rows always link, since those rows are contact records themselves. Clicking a link copies the HubSpot URL to your clipboard rather than opening it directly — this dashboard runs in a sandboxed view that doesn't allow direct outbound navigation — paste the copied link into a browser tab to open the record. For Calls/Emails/Meetings/Notes, HubSpot's lookup for this only returns up to 1000 matches per type per range — busy multi-day ranges (This Month especially) may have some rows without a link as a result; Today/Yesterday/This Week are well under that cap.</div>
+    </details>
   </div>
 
   <footer>Data pulled live from HubSpot each time this page opens or a range/rep filter changes. Meetings are credited to whoever booked them (not whoever they're assigned to/hosting), and "Meetings Booked" counts by the date the meeting was created/booked (hs_createdate), not the date it's scheduled for — the two are often days or weeks apart. Single-day ranges show hourly buckets; multi-day ranges show one bucket per calendar day, weekends included. "Enquiries" counts contacts newly assigned (or reassigned/reconverted) to a rep during the period — HubSpot's dedicated Enquiries object exists in this account but isn't reachable from this integration, so contact owner-assignment date is used as the closest available proxy. "Speed to First Contact" and "Enquiries Contacted/Untouched" are name-matched between new leads and this period's call log (no clean lead↔call ID join is exposed by this integration) — treat as a close estimate, not an exact figure. Switch "View" to Sales Agent to drill into one rep's KPIs and per-metric trends.</footer>
@@ -291,6 +342,16 @@ function escapeHtml(str) {
 }
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+/* Long explanatory notes (Booked vs Hosted methodology, per-rep reconciliation
+   write-ups) are genuinely long — not shortening them, since the detail is
+   the point — but they shouldn't sit fully expanded on screen by default.
+   Renders as a native <details>/<summary>, closed by default, just the
+   one-line summary showing until clicked. gridSpan adds grid-column:1/-1 for
+   the spots that live inside a CSS-grid kpi-grid. */
+function caveatDetails(summary, bodyHtml, gridSpan) {
+  return `<details class="caveat-details"${gridSpan ? ' style="grid-column:1/-1;"' : ''}><summary>${summary}</summary><div class="caveat-body">${bodyHtml}</div></details>`;
+}
 
 /* ---------- Loading ETA / countdown ----------
    HubSpot's own rate limiting (not just this dashboard's MAX_CONCURRENT_QUERIES
@@ -439,10 +500,50 @@ function calendarDaySessions(fromDate, toDateInclusive) {
   return sessions;
 }
 
+// Set by the "Or pick a day" date input — lets Kyle look at one specific
+// arbitrary calendar day's stats, not just the fixed Today/Yesterday/This
+// Week/etc. tabs. 'YYYY-MM-DD' or null if no custom date has been picked.
+let customSelectedDateStr = null;
+
+// Set when the "range" checkbox next to the date picker is on and both a
+// start and end date are filled in — lets Kyle see combined stats across any
+// arbitrary span of days, not just one day at a time. Reuses the exact same
+// calendarDaySessions() machinery as This Week/This Month (mode: 'daily'),
+// just with an arbitrary start/end instead of a fixed calendar week/month.
+let customRangeStartStr = null;
+let customRangeEndStr = null;
+
+function parseDateStr(str) {
+  const [y, mo, d] = str.split('-').map(Number);
+  return new Date(y, mo - 1, d);
+}
+
 function getRangeConfig(key) {
   const now = new Date();
   const nowMs = now.getTime();
 
+  if (key === 'customRange' && customRangeStartStr && customRangeEndStr) {
+    // Swap silently if picked backwards — no reason to error over it.
+    let start = parseDateStr(customRangeStartStr);
+    let end = parseDateStr(customRangeEndStr);
+    if (start.getTime() > end.getTime()) { const t = start; start = end; end = t; }
+    const sessions = calendarDaySessions(start, end);
+    const label = sessions.length === 1
+      ? sessions[0].dateLabel
+      : `${sessions[0].dateLabel} – ${sessions[sessions.length - 1].dateLabel}`;
+    return { key, mode: 'daily', sessions, nowMs, label };
+  }
+  if (key === 'custom' && customSelectedDateStr) {
+    const [y, mo, d] = customSelectedDateStr.split('-').map(Number);
+    const chosenOpen = atNineAm(new Date(y, mo - 1, d));
+    const s = daySessionFor(chosenOpen);
+    const today = currentSession();
+    const isToday = s.openMs === today.openMs;
+    // If the picked date is today, treat it exactly like the "Today" tab
+    // (partial day, up to right now). Otherwise it's a finished day, same as
+    // "Yesterday" — the full 9am-5:30pm session, closed.
+    return { key, mode: 'intraday', sessions: [s], nowMs: isToday ? nowMs : s.nextOpenMs, label: s.dateLabel };
+  }
   if (key === 'today') {
     const s = currentSession();
     return { key, mode: 'intraday', sessions: [s], nowMs, label: 'Today' };
@@ -629,6 +730,88 @@ async function runQueryAllPages(baseSql) {
     if (page === MAX_PAGES - 1) truncated = true;
   }
   return { rows: all, truncated };
+}
+
+/* ---------- Contact links for the Activity Log ----------
+   HubSpot account/portal ID (confirmed via get_organization_details —
+   ACCOUNT_INFORMATION.accountId) and this account's actual UI domain
+   (app-eu1.hubspot.com, EU data residency — NOT the default app.hubspot.com,
+   confirmed the same way) needed to build a working "open in HubSpot" link. */
+const HUBSPOT_PORTAL_ID = '27076755';
+const HUBSPOT_UI_DOMAIN = 'app-eu1.hubspot.com';
+function hubspotContactUrl(contactId) {
+  return `https://${HUBSPOT_UI_DOMAIN}/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`;
+}
+
+/* Resolving which contact a Call/Email/Meeting/Note belongs to requires a
+   cross-object join (SELECT hs_object_id, CONTACT.hs_object_id FROM CALL
+   WHERE ...) — confirmed directly that this switches the tool's response
+   from the normal per-row JSON to the same narrative "Dataset TSV:" block
+   used for aggregate queries, so it needs its own parser, not runQuery's.
+   Two more things confirmed directly against the live tool, both handled
+   below: (1) the plain engagement id and the joined contact id both come
+   back as a column literally labeled "[hs_object_id]" — parseHeaderKey (used
+   by runAggregateQuery) only keeps the bracketed part and would collide the
+   two, silently dropping one; disambiguated here by matching the visible
+   label text ("Record ID" vs "Contact") instead. (2) LIMIT/OFFSET are both
+   silently ignored for this join shape — a LIMIT 5 test still returned every
+   matching row, and OFFSET 1000 returned the exact same first page as OFFSET
+   0 — so pagination isn't possible here; the tool applies its own fixed cap
+   (observed at 1000 rows) regardless of what's asked for. That's fine for
+   Today/Yesterday/This Week, and best-effort for busier multi-day ranges:
+   entries beyond the cap just render without a contact link rather than
+   erroring. */
+async function runContactLinkQuery(sql) {
+  let lastErr;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) await sleep(1500 * attempt + Math.random() * 400);
+    const r = await callHubSpotTool({
+      sql,
+      verbosityLevel: 'LOW',
+      chatInsights: {
+        userIntent: 'Management dashboard: resolve each logged call/email/meeting/note to its associated HubSpot contact record ID so names in the Activity Log can link to that contact',
+        satisfaction: 'NEUTRAL'
+      }
+    });
+    if (r && r.isError) {
+      const msg = (r.content && r.content[0] && r.content[0].text) || 'HubSpot query failed';
+      lastErr = new Error(msg);
+      if (/rate limit/i.test(msg)) continue;
+      throw lastErr;
+    }
+
+    let data = null;
+    try { data = r.structuredContent ?? JSON.parse(r.content[0].text); } catch (e) { data = null; }
+
+    const narrativeCandidates = [];
+    if (data && Array.isArray(data.results) && data.results.length && typeof data.results[0].content === 'string') {
+      narrativeCandidates.push(data.results[0].content);
+    }
+    if (r.content && r.content[0] && typeof r.content[0].text === 'string') {
+      narrativeCandidates.push(r.content[0].text);
+    }
+
+    for (const text of narrativeCandidates) {
+      const m = text.match(/Dataset TSV:\s*\n([\s\S]*)/);
+      if (!m) continue;
+      const lines = m[1].trim().split('\n').filter(Boolean).filter(l => !/^Showing\s+\d+\s+of\s+\d+/i.test(l));
+      if (!lines.length) continue;
+      const headers = lines[0].split('\t');
+      const recordIdx = headers.findIndex(h => /^Record ID\b/i.test(h.trim()));
+      const contactIdx = headers.findIndex((h, i) => i !== recordIdx && /^Contact\b/i.test(h.trim()));
+      const map = new Map();
+      if (recordIdx === -1 || contactIdx === -1) return map;
+      lines.slice(1).forEach(line => {
+        const cells = line.split('\t');
+        const engagementId = cells[recordIdx];
+        const contactId = cells[contactIdx];
+        if (engagementId && contactId) map.set(engagementId, contactId);
+      });
+      return map;
+    }
+    return new Map();
+  }
+  throw lastErr || new Error('HubSpot query failed after retries');
 }
 
 /* ---------- HubSpot fetching (aggregate / GROUP BY queries) ----------
@@ -824,17 +1007,33 @@ function groupByOwner(rows, field = 'hubspot_owner_id', resolveId = null) {
 }
 
 /* ---------- Local cache for closed date ranges ----------
-   "Yesterday," "Last Week," and "Last Month" describe periods that are
-   completely finished — the data behind them can't change, so re-running the
-   same 7-query fetch every time the user clicks that tab (or every time the
-   artifact is reopened) burns HubSpot queries for an answer that's already
-   settled. "Today," "This Week," "This Month," and the 14-day trend are still
-   in progress, so those are never cached and always fetch fresh.
-   Cache key bakes in the exact window boundaries (not just the range name),
-   so "Yesterday" automatically stops matching the cache the day after
-   tomorrow rolls around — no manual invalidation needed. */
-const CACHE_VERSION = 'v1';
-const CLOSED_RANGE_KEYS = new Set(['yesterday', 'lastWeek', 'lastMonth']);
+   Any range whose last day has fully finished — Yesterday, Last Week, Last
+   Month, a specific past date picked via "Or pick a day," or a past custom
+   date-range — describes a period that's completely done and can't change,
+   so re-running the same 7-query fetch every time the user reopens it (or
+   reopens the artifact entirely) burns HubSpot queries for an answer that's
+   already settled. Today/This Week/This Month/the 14-day trend, and any
+   custom day/range that includes today, are still in progress, so those
+   always fetch fresh and are never cached.
+
+   Used to be a hardcoded Set of three range keys (yesterday/lastWeek/
+   lastMonth), which meant every custom date Kyle picked via the date
+   picker re-fetched from HubSpot every single time — his ask ("cache all
+   previous days ... going back won't take forever"). Replaced with a
+   dynamic "is the range's last session already over" check so ANY closed
+   range gets cached automatically, custom dates/ranges included, with no
+   fixed list to keep updating. Cache key bakes in the exact window
+   boundaries (not just the range name), so e.g. "Yesterday" automatically
+   stops matching the cache the day after tomorrow rolls around, and each
+   distinct custom date/range gets its own cache entry — no manual
+   invalidation needed, and it persists in localStorage across sessions
+   (survives closing and reopening the artifact), not just within one load. */
+const CACHE_VERSION = 'v2';
+
+function isClosedRange(rangeConfig) {
+  const last = rangeConfig.sessions[rangeConfig.sessions.length - 1];
+  return last.nextOpenMs <= Date.now();
+}
 
 function cacheKeyFor(rangeConfig) {
   const first = rangeConfig.sessions[0];
@@ -843,7 +1042,7 @@ function cacheKeyFor(rangeConfig) {
 }
 
 function readRangeCache(rangeConfig) {
-  if (!CLOSED_RANGE_KEYS.has(rangeConfig.key)) return null;
+  if (!isClosedRange(rangeConfig)) return null;
   try {
     const raw = localStorage.getItem(cacheKeyFor(rangeConfig));
     if (!raw) return null;
@@ -852,7 +1051,7 @@ function readRangeCache(rangeConfig) {
 }
 
 function writeRangeCache(rangeConfig, results, truncated) {
-  if (!CLOSED_RANGE_KEYS.has(rangeConfig.key)) return;
+  if (!isClosedRange(rangeConfig)) return;
   try {
     localStorage.setItem(cacheKeyFor(rangeConfig), JSON.stringify({ results, truncated, cachedAt: Date.now() }));
   } catch (e) {
@@ -1064,6 +1263,38 @@ async function loadTodayCalls() {
     todayCallsLoading = false;
     renderAll();
   }
+}
+
+/* ---------- Contact links for the currently selected range ----------
+   Fetched separately from the main loadAll() range fetch (same "load
+   independently, re-render when ready" pattern as Today's Calls/Trend above)
+   since it's 4 extra cross-object queries that only the Activity Log needs —
+   no reason to slow down loadTrendData()/loadWeeklyTrendData(), which never
+   render the log. Best-effort: New Lead and Enquiry rows already carry their
+   own contact id directly (they ARE contact records), so only Call/Email/
+   Meeting/Note need this lookup. */
+let contactLinkMaps = { calls: new Map(), emails: new Map(), meetings: new Map(), notes: new Map() };
+
+async function loadContactLinks(rangeConfig) {
+  try {
+    const range = paddedSqlRange(rangeConfig);
+    const ownerIds = OWNERS.map(o => `'${o.id}'`).join(',');
+    const ownerFilter = `hubspot_owner_id IN (${ownerIds})`;
+    const creatorFilter = `hs_created_by_user_id IN (${allCreatorIds().map(id => `'${id}'`).join(',')})`;
+
+    const [calls, emails, meetings, notes] = await Promise.all([
+      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
+      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM EMAIL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
+      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM MEETING WHERE ${creatorFilter} AND hs_createdate BETWEEN '${range.start}' AND '${range.end}'`),
+      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM NOTE WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`)
+    ]);
+    contactLinkMaps = { calls, emails, meetings, notes };
+  } catch (err) {
+    // Best-effort only. If this fails for any reason, the Activity Log just
+    // renders without contact links rather than blocking anything else.
+    contactLinkMaps = { calls: new Map(), emails: new Map(), meetings: new Map(), notes: new Map() };
+  }
+  renderAll();
 }
 
 function formatDurationLong(ms) {
@@ -1695,6 +1926,28 @@ function stripHtml(str) {
   return String(str).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/* Wraps just the contact's name (not the whole row) in a "link" to their
+   HubSpot record — e.g. in "Left voicemail — Call with FUJIFILM", only
+   "FUJIFILM" is clickable. Falls back to plain escaped text if there's no
+   resolved contactId for this row. Callers pass already-plain (unescaped)
+   text; this is the only place that needs to escape it since the result is
+   inserted as raw HTML by renderActivityLog.
+
+   Rendered as a <span data-url> + delegated click handler (see
+   handleContactLinkClick below), NOT a real <a href target="_blank"> —
+   confirmed directly that plain anchor navigation silently does nothing
+   inside this artifact's sandboxed view (no console error, just no
+   navigation), so clicking copies the HubSpot URL to the clipboard instead
+   and shows a "Copied" confirmation — paste it into a browser tab. */
+function linkedContactName(name, contactId) {
+  const safe = escapeHtml(name);
+  return contactId ? `<span class="contact-link" data-contact-url="${escapeHtml(hubspotContactUrl(contactId))}" role="button" tabindex="0">${safe}</span>` : safe;
+}
+
+function contactLinkSpan(label, contactId) {
+  return contactId ? ` <span class="contact-link" data-contact-url="${escapeHtml(hubspotContactUrl(contactId))}" role="button" tabindex="0">${escapeHtml(label)}</span>` : '';
+}
+
 function buildActivityLog(filteredResults) {
   const entries = [];
   filteredResults.forEach(r => {
@@ -1704,16 +1957,27 @@ function buildActivityLog(filteredResults) {
     r.calls.forEach(c => {
       const disposition = CALL_DISPOSITIONS[c.hs_call_disposition] || 'Logged';
       const dur = Number(c.hs_call_duration) || 0;
+      const contactId = contactLinkMaps.calls.get(String(c.hs_object_id)) || null;
+      // Call titles are almost always "Call with {Name}" — pull the name out
+      // and link just that, rather than the whole title. Anything that
+      // doesn't match the pattern (rare) just renders as plain escaped text.
+      const titleMatch = c.hs_call_title && c.hs_call_title.match(/^(Call with )(.+)$/i);
+      const titleHtml = c.hs_call_title
+        ? (titleMatch ? `${escapeHtml(titleMatch[1])}${linkedContactName(titleMatch[2], contactId)}` : escapeHtml(c.hs_call_title))
+        : '';
       entries.push({
         ts: Number(c.hs_timestamp), ownerName, color, type: 'Call',
-        detail: `${disposition}${dur > 0 ? ' · ' + formatDuration(dur) : ''}${c.hs_call_title ? ' — ' + c.hs_call_title : ''}`
+        detailHtml: `${escapeHtml(disposition)}${dur > 0 ? ' · ' + escapeHtml(formatDuration(dur)) : ''}${titleHtml ? ' — ' + titleHtml : ''}`,
+        contactId
       });
     });
     r.emails.forEach(e => {
       const dir = (e.hs_email_direction || '').toUpperCase() === 'EMAIL' ? 'Sent' : 'Received';
+      const contactId = contactLinkMaps.emails.get(String(e.hs_object_id)) || null;
       entries.push({
         ts: Number(e.hs_timestamp), ownerName, color, type: 'Email',
-        detail: `${dir}${e.hs_email_subject ? ' — ' + e.hs_email_subject : ''}`
+        detailHtml: `${escapeHtml(dir)}${e.hs_email_subject ? ' — ' + escapeHtml(e.hs_email_subject) : ''}${contactLinkSpan('View contact ↗', contactId)}`,
+        contactId
       });
     });
     r.meetings.forEach(m => {
@@ -1721,35 +1985,91 @@ function buildActivityLog(filteredResults) {
       // filter — the scheduled meeting time is shown in the detail text
       // instead, since it can be days or weeks after the booking itself.
       const scheduledFor = m.hs_timestamp ? new Date(Number(m.hs_timestamp)).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+      const contactId = contactLinkMaps.meetings.get(String(m.hs_object_id)) || null;
+      // Meeting titles don't follow one consistent "with {Name}" pattern
+      // (some are "Appointment with X", some are property/BAP codenames), so
+      // unlike Calls above this isn't reliably parseable — link is appended
+      // instead of embedded in the name.
       entries.push({
         ts: Number(m.hs_createdate), ownerName, color, type: 'Meeting',
-        detail: `${m.hs_meeting_outcome || 'Booked'}${m.hs_meeting_title ? ' — ' + m.hs_meeting_title : ''}${scheduledFor ? ` (scheduled for ${scheduledFor})` : ''}`
+        detailHtml: `${escapeHtml(m.hs_meeting_outcome || 'Booked')}${m.hs_meeting_title ? ' — ' + escapeHtml(m.hs_meeting_title) : ''}${scheduledFor ? ` (scheduled for ${escapeHtml(scheduledFor)})` : ''}${contactLinkSpan('View contact ↗', contactId)}`,
+        contactId
       });
     });
     r.notes.forEach(n => {
       const body = stripHtml(n.hs_note_body);
+      const contactId = contactLinkMaps.notes.get(String(n.hs_object_id)) || null;
+      const bodyText = body ? (body.length > 140 ? body.slice(0, 140) + '…' : body) : 'Note logged';
       entries.push({
         ts: Number(n.hs_timestamp), ownerName, color, type: 'Note',
-        detail: body ? (body.length > 140 ? body.slice(0, 140) + '…' : body) : 'Note logged'
+        detailHtml: `${escapeHtml(bodyText)}${contactLinkSpan('View contact ↗', contactId)}`,
+        contactId
       });
     });
     r.leads.forEach(l => {
       const name = [l.firstname, l.lastname].filter(Boolean).join(' ');
+      // Leads ARE contact records — hs_object_id here already is the
+      // contact's own id, no join/lookup needed, always resolvable — so the
+      // lead's own name is always the clickable part here.
+      const contactId = l.hs_object_id || null;
       entries.push({
         ts: Number(l.createdate), ownerName, color, type: 'New Lead',
-        detail: `${name || 'New contact'} created${l.email ? ' — ' + l.email : ''}`
+        detailHtml: `${linkedContactName(name || 'New contact', contactId)} created${l.email ? ' — ' + escapeHtml(l.email) : ''}`,
+        contactId
       });
     });
     r.enquiries.forEach(en => {
+      const contactId = en.hs_object_id || null;
       entries.push({
         ts: Number(en.hubspot_owner_assigneddate), ownerName, color, type: 'Enquiry',
-        detail: 'Contact owner assigned (new or reconverted)'
+        detailHtml: `Contact owner assigned (new or reconverted)${contactLinkSpan('View contact ↗', contactId)}`,
+        contactId
       });
     });
   });
 
   entries.sort((a, b) => b.ts - a.ts);
   return entries;
+}
+
+/* Type filter — lets Kyle narrow the Activity Log down to just Calls, just
+   Emails, etc. (or any combination) instead of always showing every logged
+   activity type mixed together. Same chip pattern as the rep filter above,
+   scoped only to this panel. */
+let activeActivityTypes = new Set(Object.keys(ACTIVITY_TYPE_COLORS));
+
+function renderActivityTypeChips() {
+  const row = document.getElementById('activityTypeFilterRow');
+  row.innerHTML = '<span class="rep-filter-label">Type:</span>';
+  Object.keys(ACTIVITY_TYPE_COLORS).forEach(type => {
+    const chip = document.createElement('span');
+    chip.className = 'rep-chip' + (activeActivityTypes.has(type) ? ' on' : '');
+    chip.style.setProperty('--dot-color', ACTIVITY_TYPE_COLORS[type]);
+    chip.style.color = activeActivityTypes.has(type) ? ACTIVITY_TYPE_COLORS[type] : '';
+    chip.dataset.type = type;
+    chip.innerHTML = `<span class="rep-dot"></span>${escapeHtml(type)}`;
+    chip.addEventListener('click', () => {
+      if (activeActivityTypes.has(type)) activeActivityTypes.delete(type);
+      else activeActivityTypes.add(type);
+      renderActivityTypeChips();
+      renderAll();
+    });
+    row.appendChild(chip);
+  });
+  const actions = document.createElement('span');
+  actions.className = 'rep-filter-actions';
+  actions.innerHTML = '<button type="button" data-act="all">All</button><button type="button" data-act="none">None</button>';
+  actions.querySelector('[data-act="all"]').addEventListener('click', () => {
+    activeActivityTypes = new Set(Object.keys(ACTIVITY_TYPE_COLORS));
+    renderActivityTypeChips();
+    renderAll();
+  });
+  actions.querySelector('[data-act="none"]').addEventListener('click', () => {
+    activeActivityTypes = new Set();
+    renderActivityTypeChips();
+    renderAll();
+  });
+  row.appendChild(actions);
 }
 
 function renderActivityLog(filteredResults, rangeConfig) {
@@ -1759,7 +2079,7 @@ function renderActivityLog(filteredResults, rangeConfig) {
 
   sub.textContent = `${rangeConfig.label} · ${filteredResults.length} rep${filteredResults.length === 1 ? '' : 's'} selected · most recent first`;
 
-  const entries = buildActivityLog(filteredResults);
+  const entries = buildActivityLog(filteredResults).filter(e => activeActivityTypes.has(e.type));
   const shown = entries.slice(0, ACTIVITY_LOG_CAP);
 
   body.innerHTML = shown.length ? shown.map(e => {
@@ -1769,7 +2089,7 @@ function renderActivityLog(filteredResults, rangeConfig) {
       <td>${escapeHtml(new Date(e.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}</td>
       <td><div class="rep-cell"><span class="rep-dot" style="background:${e.color}"></span>${escapeHtml(e.ownerName)}</div></td>
       <td><span class="type-badge" style="background:${typeColor}1a;color:${typeColor};">${escapeHtml(e.type)}</span></td>
-      <td>${escapeHtml(e.detail)}</td>
+      <td>${e.detailHtml}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="4" style="color:#9ca3af;">No activity logged for this range/filter.</td></tr>';
 
@@ -1778,21 +2098,22 @@ function renderActivityLog(filteredResults, rangeConfig) {
     : `${entries.length} logged activities for "${rangeConfig.label}".`;
 }
 
-/* ---------- Hourly calls-today bar chart (Agent Focus → Trend) ----------
-   Kyle asked for a plain "calls made per hour, 9am-6pm, today" bar alongside
-   the existing 14-day trend lines. Fixed to today's calendar date and a fixed
-   9am-6pm window regardless of which range tab is active up top — same
-   pattern as the 14-day trend, which also ignores the range tabs. Reuses
-   todayCallsByOwner (already fetched for the separate "Today's Calls" panel)
-   instead of firing a second query for the same data. */
-function buildHourlyBucketsToday() {
+/* ---------- Hourly calls bar chart (Agent Focus → Trend) ----------
+   "Calls by Hour" — bucketed by hour-of-day (9am-6pm), for whichever range
+   tab is currently selected up top (Today/Yesterday/This Week/etc.), not
+   hardcoded to today. Used to always pull today's calls regardless of the
+   active range tab, which meant switching to "Yesterday" or "This Week"
+   still showed today's hourly pattern — confusing and wrong. Now buckets
+   repResult.calls (already scoped to the selected rangeConfig) by hour-of-day:
+   for a single-day range (Today/Yesterday) that's just that day's hours; for
+   a multi-day range (This Week/This Month/etc.) it sums each hour-of-day
+   across every day in the range, which is still a meaningful "when do calls
+   happen" view. */
+function buildHourlyBuckets() {
   const buckets = [];
-  const now = new Date();
   for (let h = 9; h < 18; h++) {
-    const start = new Date(now); start.setHours(h, 0, 0, 0);
-    const end = new Date(now); end.setHours(h + 1, 0, 0, 0);
     const label = h === 12 ? '12pm' : (h < 12 ? `${h}am` : `${h - 12}pm`);
-    buckets.push({ startMs: start.getTime(), endMs: end.getTime(), label });
+    buckets.push({ hour: h, label });
   }
   return buckets;
 }
@@ -1922,7 +2243,11 @@ function renderQualifiedGrid(ownerId) {
   // per side that actually has a reconciliation, rather than one combined note.
   const reconNotes = [bookedRecon, hostedRecon]
     .filter(Boolean)
-    .map(r => `<div class="caveat" style="grid-column:1/-1;">📋 Last checked ${r.asOf}: ${escapeHtml(r.note)} This is a manual, point-in-time check (not live) — ask Claude to re-run it if it's been a while or new bookings have come in since.</div>`)
+    .map(r => caveatDetails(
+      `📋 Last checked ${r.asOf} — reconciliation note`,
+      `${escapeHtml(r.note)} This is a manual, point-in-time check (not live) — ask Claude to re-run it if it's been a while or new bookings have come in since.`,
+      true
+    ))
     .join('');
 
   if (cached.isSetterOnly) {
@@ -1952,7 +2277,11 @@ function renderQualifiedGrid(ownerId) {
   grid.innerHTML = bookedCards.map(cardHtml).join('')
     + `<div style="grid-column:1/-1;height:1px;"></div>`
     + hostedCards.map(cardHtml).join('')
-    + `<div class="caveat" style="grid-column:1/-1;">"Booked" (hs_created_by_user_id) = meetings this rep personally created. "Hosted" (hubspot_owner_id) = meetings assigned to this rep, whoever created them. On this team these are often different people — pure setters (Amy, Samuele) book on closers' behalf. Two separate things can make Booked look wrong for a rep, and they need different fixes: (1) HubSpot doesn't always reassign the owner when a setter books for a closer, so a rep's true Hosted total can be a real undercount — confirmed on Lara, Tim, and Liam, whose real meetings booked by Sam/Amy/others never show up in their Hosted number because those reps created the records. (2) Separately, HubSpot's "owner" ID and "login/creator" ID are two different ID systems that don't always match for the same person — confirmed on Thomas Murray (real login ID 64248901, not his owner ID) and Diarnah Lynch (50258835): both were showing 0 Booked for their entire history because every query checked the wrong ID. Fixed by aliasing both IDs together for these two reps specifically (see REP_CREATOR_ALIASES in the code) — their Booked numbers are now real. Mark Meyer's meetings mostly have no creator recorded at all ("Unassigned"), which is a genuine data gap with no ID to alias. Both figures are all-time, unbounded by the range tabs above.</div>`
+    + caveatDetails(
+        '📋 Why "Booked" and "Hosted" can look off for some reps',
+        `"Booked" (hs_created_by_user_id) = meetings this rep personally created. "Hosted" (hubspot_owner_id) = meetings assigned to this rep, whoever created them. On this team these are often different people — pure setters (Amy, Samuele) book on closers' behalf. Two separate things can make Booked look wrong for a rep, and they need different fixes: (1) HubSpot doesn't always reassign the owner when a setter books for a closer, so a rep's true Hosted total can be a real undercount — confirmed on Lara, Tim, and Liam, whose real meetings booked by Sam/Amy/others never show up in their Hosted number because those reps created the records. (2) Separately, HubSpot's "owner" ID and "login/creator" ID are two different ID systems that don't always match for the same person — confirmed on Thomas Murray (real login ID 64248901, not his owner ID) and Diarnah Lynch (50258835): both were showing 0 Booked for their entire history because every query checked the wrong ID. Fixed by aliasing both IDs together for these two reps specifically (see REP_CREATOR_ALIASES in the code) — their Booked numbers are now real. Mark Meyer's meetings mostly have no creator recorded at all ("Unassigned"), which is a genuine data gap with no ID to alias. Both figures are all-time, unbounded by the range tabs above.`,
+        true
+      )
     + reconNotes;
 }
 
@@ -2077,7 +2406,7 @@ function renderFocusView(repResult, rangeConfig) {
 
     trendGrid.innerHTML = `
       <div class="mini-chart-card">
-        <div class="mini-chart-title">Calls by Hour (Today, 9am-6pm)</div>
+        <div class="mini-chart-title">Calls by Hour (${escapeHtml(rangeConfig.label)}, 9am-6pm)</div>
         <div class="mini-chart-wrap"><canvas id="mini-hourlyCalls"></canvas></div>
       </div>`
       + METRICS.map(m => `
@@ -2090,15 +2419,16 @@ function renderFocusView(repResult, rangeConfig) {
     miniChartInstances.forEach(ch => ch.destroy());
     miniChartInstances = [];
 
-    // Hourly calls-today bar — independent of the 14-day trend lines below,
-    // sourced from todayCallsByOwner (already fetched for the "Today's Calls"
-    // panel) rather than a second query.
+    // Hourly calls bar — bucketed by hour-of-day for whichever range is
+    // currently selected (rangeConfig, the same one driving the KPI cards
+    // above), sourced straight from repResult.calls rather than a separate
+    // "always today" fetch.
     {
-      const hourlyBuckets = buildHourlyBucketsToday();
-      const todayCalls = (todayCallsByOwner && todayCallsByOwner[repResult.owner.id] && todayCallsByOwner[repResult.owner.id].calls) || [];
-      const hourlyData = hourlyBuckets.map(b => todayCalls.filter(c => {
+      const hourlyBuckets = buildHourlyBuckets();
+      const rangeCalls = repResult.calls || [];
+      const hourlyData = hourlyBuckets.map(b => rangeCalls.filter(c => {
         const t = Number(c.hs_timestamp);
-        return t >= b.startMs && t < b.endMs;
+        return t && new Date(t).getHours() === b.hour;
       }).length);
       const ctx = document.getElementById('mini-hourlyCalls').getContext('2d');
       const chart = new Chart(ctx, {
@@ -2253,6 +2583,7 @@ function renderAll() {
 async function loadAndRender(rangeKey) {
   currentRangeKey = rangeKey;
   document.querySelectorAll('.range-tab').forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-range') === rangeKey));
+  document.getElementById('customDatePickerWrap').classList.toggle('active', rangeKey === 'custom' || rangeKey === 'customRange');
 
   const statusEl = document.getElementById('status');
   const loadingBar = document.getElementById('loadingBar');
@@ -2272,6 +2603,12 @@ async function loadAndRender(rangeKey) {
     // called out explicitly once the timer hits zero rather than looking stuck.
     countdownId = startCountdown(statusEl, 7, 'Fetching HubSpot activity');
   }
+
+  // Fired in parallel, not awaited — contact links only feed the Activity
+  // Log's "View contact" links, so they shouldn't hold up the main KPI/table
+  // render. renderAll() runs again inside loadContactLinks() once its own
+  // fetch resolves, which fills the links in retroactively.
+  loadContactLinks(rangeConfigPreview);
 
   try {
     const rangeConfig = rangeConfigPreview;
@@ -2314,6 +2651,39 @@ document.getElementById('rangeTabs').addEventListener('click', ev => {
   loadAndRender(key);
 });
 
+document.getElementById('customRangeToggle').addEventListener('change', ev => {
+  const isRange = ev.target.checked;
+  document.getElementById('customRangeToField').classList.toggle('hidden', !isRange);
+  // Flip back into single-day mode immediately if the toggle turns off and a
+  // single date is already picked; flip into range mode immediately if both
+  // ends are already filled in (rather than waiting for another date edit).
+  if (!isRange && customSelectedDateStr) {
+    loadAndRender('custom');
+  } else if (isRange && customRangeStartStr && customRangeEndStr) {
+    loadAndRender('customRange');
+  }
+});
+
+document.getElementById('customDatePicker').addEventListener('change', ev => {
+  const val = ev.target.value; // 'YYYY-MM-DD', or '' if cleared
+  if (!val) return;
+  const isRange = document.getElementById('customRangeToggle').checked;
+  if (isRange) {
+    customRangeStartStr = val;
+    if (customRangeEndStr) loadAndRender('customRange');
+  } else {
+    customSelectedDateStr = val;
+    loadAndRender('custom');
+  }
+});
+
+document.getElementById('customDatePickerEnd').addEventListener('change', ev => {
+  const val = ev.target.value;
+  if (!val) return;
+  customRangeEndStr = val;
+  if (customRangeStartStr) loadAndRender('customRange');
+});
+
 document.getElementById('todayCallsRefreshBtn').addEventListener('click', () => { loadTodayCalls(); });
 
 document.getElementById('viewTabs').addEventListener('click', ev => {
@@ -2326,8 +2696,66 @@ document.getElementById('viewTabs').addEventListener('click', ev => {
   renderAll();
 });
 
+/* ---------- Contact links: click-to-copy ----------
+   Confirmed directly: a plain <a href target="_blank"> to an external
+   HubSpot URL does nothing when clicked inside this artifact's sandboxed
+   view — no console error, the navigation is just silently swallowed. So
+   contact links render as plain <span data-contact-url> (see
+   linkedContactName/contactLinkSpan above), and clicking one copies the
+   HubSpot URL to the clipboard instead, with a toast confirming the copy —
+   paste it into an actual browser tab to open it. */
+function showToast(msg) {
+  let toast = document.getElementById('copyToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'copyToast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => toast.classList.remove('show'), 2200);
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) { /* best effort */ }
+  document.body.removeChild(ta);
+}
+
+document.body.addEventListener('click', ev => {
+  const el = ev.target.closest('.contact-link');
+  if (!el) return;
+  const url = el.getAttribute('data-contact-url');
+  if (!url) return;
+  copyToClipboard(url);
+  showToast('HubSpot link copied — paste it into a browser tab to open');
+});
+
+document.body.addEventListener('keydown', ev => {
+  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList && ev.target.classList.contains('contact-link')) {
+    ev.preventDefault();
+    ev.target.click();
+  }
+});
+
 renderViewTabs();
 renderRepFilterChips();
+renderActivityTypeChips();
 renderAgentPickerChips();
 loadAndRender('today');
 loadTodayCalls();
