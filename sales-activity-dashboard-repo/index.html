@@ -1668,13 +1668,25 @@ async function loadBookHealth(ownerId) {
     const todayStr = daysAgoStr(0);
     const fourteenDaysAgoStr = daysAgoStr(14);
 
-    const [totalContacts, callEmailRes, noteMeetingRes, overdueTasks, overdueTasks14] = await Promise.all([
-      runSingleCountQuery(`SELECT COUNT(*) FROM CONTACT WHERE hubspot_owner_id = '${ownerId}'`),
+    // Note: selecting TASK's own hs_object_id alongside CONTACT.hs_object_id is the same
+    // "two different associated id columns" shape as the Activity Log's contact-link lookups —
+    // confirmed live this returns the narrative "Dataset TSV:" block, not row-style JSON, so this
+    // one has to go through runContactLinkQuery (which already parses that shape into a Map),
+    // not runQueryAllPages (which would silently parse every row as {} and undercount to zero).
+    const [allContactsRes, callEmailRes, noteMeetingRes, openTaskMap, overdueTasks, overdueTasks14] = await Promise.all([
+      runQueryAllPages(`SELECT hs_object_id, priority FROM CONTACT WHERE hubspot_owner_id = '${ownerId}'`),
       runQueryAllPages(`SELECT hs_object_id FROM CONTACT WHERE hubspot_owner_id = '${ownerId}' AND (CALL.hubspot_owner_id = '${ownerId}' OR EMAIL.hubspot_owner_id = '${ownerId}')`),
       runQueryAllPages(`SELECT hs_object_id FROM CONTACT WHERE hubspot_owner_id = '${ownerId}' AND (NOTE.hubspot_owner_id = '${ownerId}' OR MEETING.hs_created_by_user_id IN (${meetingCreatorIn}))`),
+      // Every still-open (not Completed) task assigned to this rep, on a contact this rep also
+      // owns — same dual-owner-match rule as Overdue Tasks below, so a task handed off to/from a
+      // teammate doesn't count as "a plan." Same 1000-row observed cap as contact-link lookups —
+      // best-effort for reps with a very large open-task list (see caveat text below).
+      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM TASK WHERE hubspot_owner_id = '${ownerId}' AND hs_task_status != 'COMPLETED' AND CONTACT.hubspot_owner_id = '${ownerId}'`),
       runSingleCountQuery(`SELECT COUNT(*) FROM TASK WHERE hubspot_owner_id = '${ownerId}' AND hs_task_status != 'COMPLETED' AND hs_timestamp < '${todayStr}' AND CONTACT.hubspot_owner_id = '${ownerId}'`),
       runSingleCountQuery(`SELECT COUNT(*) FROM TASK WHERE hubspot_owner_id = '${ownerId}' AND hs_task_status != 'COMPLETED' AND hs_timestamp < '${fourteenDaysAgoStr}' AND CONTACT.hubspot_owner_id = '${ownerId}'`)
     ]);
+
+    const totalContacts = allContactsRes.rows.length;
 
     const touchedIds = new Set();
     callEmailRes.rows.forEach(r => { if (r.hs_object_id) touchedIds.add(r.hs_object_id); });
@@ -1682,9 +1694,22 @@ async function loadBookHealth(ownerId) {
 
     const contacted = touchedIds.size;
     const untouched = Math.max(0, totalContacts - contacted);
-    const truncated = callEmailRes.truncated || noteMeetingRes.truncated;
+    const truncated = callEmailRes.truncated || noteMeetingRes.truncated || allContactsRes.truncated;
 
-    bookHealthCache[ownerId] = { totalContacts, contacted, untouched, truncated, overdueTasks, overdueTasks14, error: null };
+    // openTaskMap is engagementId(task) -> contactId; we only need the distinct contact ids.
+    const contactsWithOpenTask = new Set(openTaskMap.values());
+
+    const priorityCounts = { Hot: 0, Warm: 0, Cold: 0, Dead: 0, notSet: 0 };
+    let untouchedNoPlan = 0;
+    allContactsRes.rows.forEach(c => {
+      const id = c.hs_object_id;
+      const p = c.priority;
+      if (p === 'Hot' || p === 'Warm' || p === 'Cold' || p === 'Dead') priorityCounts[p]++;
+      else priorityCounts.notSet++;
+      if (id && !touchedIds.has(id) && !contactsWithOpenTask.has(id) && p !== 'Dead') untouchedNoPlan++;
+    });
+
+    bookHealthCache[ownerId] = { totalContacts, contacted, untouched, untouchedNoPlan, priorityCounts, truncated, overdueTasks, overdueTasks14, error: null };
   } catch (err) {
     bookHealthCache[ownerId] = { error: err && err.message ? err.message : String(err) };
   } finally {
@@ -1712,13 +1737,19 @@ function renderBookHealthGrid(ownerId) {
 
   const untouchedRate = pct(cached.untouched, cached.totalContacts);
   const contactedRate = pct(cached.contacted, cached.totalContacts);
+  const pc = cached.priorityCounts || { Hot: 0, Warm: 0, Cold: 0, Dead: 0, notSet: 0 };
 
   grid.innerHTML = [
     { label: 'Total Contacts in Book', value: cached.totalContacts },
     { label: 'Contacted', value: cached.contacted, sub: `${contactedRate}% of book — by this rep` },
     { label: 'Untouched', value: cached.untouched, sub: `${untouchedRate}% of book — zero footprint from this rep` },
+    { label: 'Untouched, No Plan', value: cached.untouchedNoPlan, sub: 'untouched + no open task + not marked Dead' },
     { label: 'Overdue Tasks', value: cached.overdueTasks, sub: 'not completed, due date has passed' },
-    { label: 'Overdue 14+ Days', value: cached.overdueTasks14, sub: 'not completed, due 14+ days ago' }
+    { label: 'Overdue 14+ Days', value: cached.overdueTasks14, sub: 'not completed, due 14+ days ago' },
+    { label: 'Priority: Hot', value: pc.Hot },
+    { label: 'Priority: Warm', value: pc.Warm },
+    { label: 'Priority: Cold', value: pc.Cold },
+    { label: 'Priority: Dead', value: pc.Dead }
   ].map(c => `
     <div class="kpi-card">
       <div class="kpi-label">${escapeHtml(c.label)}</div>
@@ -1726,8 +1757,15 @@ function renderBookHealthGrid(ownerId) {
       ${c.sub ? `<div class="kpi-sub">${escapeHtml(c.sub)}</div>` : ''}
     </div>`).join('');
 
-  caveat.textContent = (cached.truncated ? '⚠ Extremely large touched-contact set (10,000+) for at least one engagement type — counts could be a slight undercount. ' : '')
-    + '"Untouched" = zero Calls, Emails, Notes, or Meetings that THIS rep personally logged against the contact — a contact worked entirely by a teammate counts as untouched here, even if it\'s fully engaged by someone else. Meetings are matched by creator, not by owner, same as "Meetings Booked" elsewhere on this dashboard. "Overdue Tasks" only counts tasks where BOTH the task itself is assigned to this rep AND the associated contact is also owned by this rep — a task assigned to this rep on a contact actually owned by a teammate (e.g. a handoff) is deliberately excluded, since this is meant to reflect this rep\'s own book falling behind, not tasks that just happen to be assigned to them. Tasks marked Completed never count, regardless of due date. "Overdue 14+ Days" is the same, restricted to tasks overdue by two weeks or more. Book size, touch status, and overdue tasks are all all-time, unbounded by the range tabs above.';
+  caveat.innerHTML = (cached.truncated ? '⚠ Extremely large touched-contact/task set (10,000+) for at least one query — counts could be a slight undercount. ' : '')
+    + caveatDetails(
+        '📋 How Book Health is calculated',
+        `"Untouched" = zero Calls, Emails, Notes, or Meetings that THIS rep personally logged against the contact — a contact worked entirely by a teammate counts as untouched here, even if it's fully engaged by someone else. Meetings are matched by creator, not by owner, same as "Meetings Booked" elsewhere on this dashboard.<br><br>`
+        + `"Untouched, No Plan" narrows that further to contacts with zero footprint from this rep, AND no still-open (not-Completed) task on that contact assigned to this rep, AND a manual Priority that isn't set to "Dead" — i.e. contacts that have fallen through the cracks with no follow-up queued and haven't been deliberately written off. A Priority left blank/not set still counts here (only "Dead" is excluded). The open-task check is capped at HubSpot's observed 1,000-row limit for this type of lookup, so for a rep with more than 1,000 open tasks, some contacts that do have a task queued could still get miscounted here as "no plan" — best-effort, same known limitation as the Activity Log's contact links.<br><br>`
+        + `"Overdue Tasks" only counts tasks where BOTH the task itself is assigned to this rep AND the associated contact is also owned by this rep — a task assigned to this rep on a contact actually owned by a teammate (e.g. a handoff) is deliberately excluded, since this is meant to reflect this rep's own book falling behind, not tasks that just happen to be assigned to them. Tasks marked Completed never count, regardless of due date. "Overdue 14+ Days" is the same, restricted to tasks overdue by two weeks or more.<br><br>`
+        + `"Priority: Hot/Warm/Cold/Dead" is a straight count of this rep's book by the manually-set Priority field (HubSpot's "priority" property) — contacts with no priority set aren't shown as their own card but are included in "Total Contacts in Book" and excluded from all four priority counts.<br><br>`
+        + `Book size, touch status, no-plan status, and overdue tasks are all all-time, unbounded by the range tabs above.`
+      );
 }
 
 /* ---------- Metrics ---------- */
