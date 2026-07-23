@@ -1,0 +1,2323 @@
+<!DOCTYPE html><script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Sales Activity Dashboard",
+  "schemaVersion": 1,
+  "description": "Management-facing sales activity dashboard for Amy, Sam, Kyle & Tim: a team comparison table (calls, connect rate, emails, meetings booked, meeting completion rate, new leads, notes) plus a trend chart with a metric selector, over Today/Yesterday/This Week/Last Week/This Month/Last Month ranges. Pulls fresh from HubSpot each time it's opened. No gamification — plain performance reporting.",
+  "mcpTools": [
+    "mcp__fa06d9cc-b3b9-4e63-a33e-89af872b44ba__query_crm_data"
+  ],
+  "mcpServerNames": [
+    "HubSpot"
+  ]
+}
+</script>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Sales Activity Dashboard — Team</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px;
+    background: #ffffff;
+    color: #1f2328;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  h1 { font-size: 19px; margin: 0 0 2px 0; }
+  .subtitle { color: #6b7280; font-size: 12.5px; margin-bottom: 16px; }
+  .status { padding: 10px 14px; border-radius: 8px; background: #f3f4f6; color: #4b5563; margin-bottom: 16px; font-size: 13px; }
+  .status.error { background: #fef2f2; color: #b91c1c; }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .range-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .range-tab {
+    background: #fff;
+    border: 1px solid #d1d5db;
+    color: #374151;
+    border-radius: 8px;
+    padding: 6px 13px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .range-tab:hover { background: #f3f4f6; }
+  .range-tab.active { background: #1e3a8a; border-color: #1e3a8a; color: #fff; }
+  .view-tab.active { background: #0d9488; border-color: #0d9488; color: #fff; }
+
+  .rep-filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .rep-filter-label { font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .02em; margin-right: 2px; }
+  .rep-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 999px;
+    padding: 5px 12px 5px 8px; font-size: 12.5px; font-weight: 600; color: #9ca3af;
+    cursor: pointer; user-select: none; transition: border-color .1s, color .1s;
+  }
+  .rep-chip .rep-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: #d1d5db; }
+  .rep-chip.on { color: #1f2328; border-color: currentColor; }
+  .rep-chip.on .rep-dot { background: var(--dot-color); }
+  .rep-chip:hover { background: #f9fafb; }
+  .rep-filter-actions { display: flex; gap: 6px; margin-left: 4px; }
+  .rep-filter-actions button {
+    background: none; border: none; color: #1e3a8a; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 4px;
+  }
+  .rep-filter-actions button:hover { text-decoration: underline; }
+
+  .panel { border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 20px 20px; margin-bottom: 20px; background: #fff; }
+  .panel-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .panel-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #374151; }
+  .panel-sub { font-size: 11.5px; color: #9ca3af; margin-top: -8px; margin-bottom: 14px; }
+  .refresh-link { background: none; border: none; color: #1e3a8a; font-size: 11.5px; font-weight: 600; cursor: pointer; padding: 0; }
+  .refresh-link:hover { text-decoration: underline; }
+
+  table.compare { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.compare th {
+    text-align: left; color: #6b7280; font-weight: 600; padding: 8px 10px;
+    border-bottom: 2px solid #e5e7eb; font-size: 11px; text-transform: uppercase; letter-spacing: .02em;
+    white-space: nowrap;
+  }
+  table.compare td { padding: 9px 10px; border-bottom: 1px solid #f1f1f1; white-space: nowrap; }
+  table.compare tr.total-row td { font-weight: 700; background: #f8fafc; border-top: 2px solid #e5e7eb; }
+  table.compare .rep-cell { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  table.compare .rep-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .rate-cell { display: flex; align-items: center; gap: 8px; }
+  .rate-track { width: 60px; height: 6px; background: #eef0f2; border-radius: 4px; overflow: hidden; flex-shrink: 0; }
+  .rate-fill { height: 100%; background: #1e3a8a; border-radius: 4px; }
+  .rate-fill.low { background: #d97706; }
+  .pct-inline { color: #9ca3af; font-size: 11px; }
+
+  .trend-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .trend-controls select {
+    border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; font-size: 12.5px; color: #1f2328; background: #fff;
+  }
+  .chart-wrap { height: 320px; position: relative; }
+  @media (max-width: 800px) { .chart-wrap { height: 260px; } }
+
+  .caveat { font-size: 11px; color: #b45309; margin-top: 10px; }
+  .note { font-size: 11px; color: #9ca3af; margin-top: 10px; }
+  footer { margin-top: 18px; color: #9ca3af; font-size: 11px; }
+
+  .loading-bar { height: 3px; border-radius: 2px; overflow: hidden; background: #eef0f2; margin-bottom: 14px; display: none; }
+  .loading-bar.active { display: block; }
+  @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+  .loading-bar-fill {
+    height: 100%; width: 40%;
+    background: linear-gradient(90deg, transparent, #1e3a8a, transparent);
+    background-size: 200px 100%;
+    animation: shimmer 1.1s linear infinite;
+  }
+
+  /* Focus view */
+  .focus-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .focus-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .focus-name { font-size: 15px; font-weight: 700; }
+  .subhead { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #6b7280; margin: 18px 0 6px; }
+  .subhead:first-of-type { margin-top: 14px; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 6px; }
+  .kpi-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; background: #fafbfc; }
+  .kpi-card .kpi-label { font-size: 10.5px; color: #6b7280; text-transform: uppercase; letter-spacing: .03em; font-weight: 600; margin-bottom: 4px; }
+  .kpi-card .kpi-value { font-size: 22px; font-weight: 700; color: #1f2328; }
+  .kpi-card .kpi-sub { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+
+  .mini-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 6px; }
+  .mini-chart-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; }
+  .mini-chart-title { font-size: 11.5px; font-weight: 700; color: #374151; margin-bottom: 8px; }
+  .mini-chart-wrap { height: 140px; position: relative; }
+  .pie-wrap { height: 190px; position: relative; }
+
+  .log-scroll { max-height: 440px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+  #activityLogTable { font-size: 12.5px; }
+  #activityLogTable thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+  #activityLogTable td, #activityLogTable th { white-space: nowrap; }
+  #activityLogTable td:last-child { white-space: normal; }
+  .type-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <h1>Sales Activity Dashboard</h1>
+  <div class="subtitle" id="dateLabel">Full team — HubSpot performance overview</div>
+  <div class="status" id="status">Fetching HubSpot activity… (wider ranges like a full month can take longer — data is paged through to avoid undercounting)</div>
+
+  <div class="toolbar">
+    <div class="range-tabs" id="viewTabs">
+      <span class="rep-filter-label" style="margin-right:2px;">View:</span>
+      <button class="range-tab view-tab" data-view="team">Team Overview</button>
+      <button class="range-tab view-tab" data-view="agent">Sales Agent</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="range-tabs" id="rangeTabs">
+      <button class="range-tab" data-range="today">Today</button>
+      <button class="range-tab" data-range="yesterday">Yesterday</button>
+      <button class="range-tab" data-range="week">This Week</button>
+      <button class="range-tab" data-range="lastWeek">Last Week</button>
+      <button class="range-tab" data-range="last14">Last 14 Days</button>
+      <button class="range-tab" data-range="month">This Month</button>
+      <button class="range-tab" data-range="lastMonth">Last Month</button>
+    </div>
+  </div>
+
+  <div class="rep-filter-row" id="repFilterRow">
+    <span class="rep-filter-label">Reps:</span>
+  </div>
+
+  <div class="rep-filter-row hidden" id="agentPickerRow">
+    <span class="rep-filter-label">Agent:</span>
+  </div>
+
+  <div class="loading-bar" id="loadingBar"><div class="loading-bar-fill"></div></div>
+
+  <div class="panel hidden" id="focusPanel">
+    <div class="panel-title-row"><div class="panel-title">Agent Focus</div></div>
+    <div class="panel-sub" id="focusSub"></div>
+    <div class="focus-header">
+      <span class="focus-dot" id="focusDot"></span>
+      <span class="focus-name" id="focusName"></span>
+    </div>
+
+    <div class="subhead">This Period</div>
+    <div class="kpi-grid" id="kpiGrid"></div>
+
+    <div class="subhead">Meetings Booked This Period</div>
+    <div class="kpi-grid" id="periodMeetingsKpiGrid"></div>
+    <div class="panel-sub" id="periodMeetingsSub" style="margin-top:14px;">Activity log</div>
+    <div class="log-scroll" style="max-height:260px;">
+      <table class="compare" id="periodMeetingsTable">
+        <thead>
+          <tr><th>Booked On</th><th>Meeting Date</th><th>Title</th><th>Outcome</th></tr>
+        </thead>
+        <tbody id="periodMeetingsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="subhead">Meetings — Booked vs. Hosted (Lifetime)</div>
+    <div class="kpi-grid" id="qualifiedKpiGrid"></div>
+    <div class="caveat" style="margin-top:8px;">📋 Number looking low for this rep? HubSpot sometimes drops a Meeting record on cancel/reschedule, even though the appointment really happened — ask Claude: "run the HubSpot reconciliation for [rep name]." It cross-checks Meeting records against booking-confirmation emails to recover the ones HubSpot lost. (Not automatic — has to be asked for, since it takes a bunch of manual lookups per rep.)</div>
+
+    <div class="subhead">Book Health — Contacted vs. Untouched (Lifetime)</div>
+    <div class="kpi-grid" id="bookHealthKpiGrid"></div>
+    <div class="caveat" id="bookHealthCaveat" style="margin-top:8px;"></div>
+
+    <div class="subhead">Trend (per metric — daily over the past 14 days, weekly over the past 12 weeks)</div>
+    <div class="mini-charts-grid" id="miniChartsGrid"></div>
+
+    <div class="caveat" id="focusCaveatNote"></div>
+  </div>
+
+  <div class="panel" id="comparePanel">
+    <div class="panel-title-row"><div class="panel-title">Team Comparison</div></div>
+    <div class="panel-sub" id="compareSub"></div>
+    <div style="overflow-x:auto;">
+      <table class="compare" id="compareTable"></table>
+    </div>
+    <div class="caveat" id="caveatNote"></div>
+  </div>
+
+  <div class="panel" id="todayCallsPanel">
+    <div class="panel-title-row">
+      <div class="panel-title">Today's Calls (always "today," regardless of the range tab above)</div>
+      <button type="button" class="refresh-link" id="todayCallsRefreshBtn">⟳ Refresh</button>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="compare" id="todayCallsTable">
+        <thead>
+          <tr>
+            <th>Rep</th><th>Calls</th><th>Connected</th><th>Connect Rate</th>
+            <th>Avg Talk Time</th><th>Median Talk Time</th><th>Total Talk Time</th>
+          </tr>
+        </thead>
+        <tbody id="todayCallsBody"></tbody>
+      </table>
+    </div>
+    <div class="note" id="todayCallsNote"></div>
+  </div>
+
+  <div class="panel" id="activityLogPanel">
+    <div class="panel-title-row"><div class="panel-title">Activity Log</div></div>
+    <div class="panel-sub" id="activityLogSub"></div>
+    <div class="log-scroll">
+      <table class="compare" id="activityLogTable">
+        <thead>
+          <tr><th>Time</th><th>Rep</th><th>Type</th><th>Detail</th></tr>
+        </thead>
+        <tbody id="activityLogBody"></tbody>
+      </table>
+    </div>
+    <div class="note" id="activityLogNote"></div>
+  </div>
+
+  <footer>Data pulled live from HubSpot each time this page opens or a range/rep filter changes. Meetings are credited to whoever booked them (not whoever they're assigned to/hosting), and "Meetings Booked" counts by the date the meeting was created/booked (hs_createdate), not the date it's scheduled for — the two are often days or weeks apart. Single-day ranges show hourly buckets; multi-day ranges show one bucket per calendar day, weekends included. "Enquiries" counts contacts newly assigned (or reassigned/reconverted) to a rep during the period — HubSpot's dedicated Enquiries object exists in this account but isn't reachable from this integration, so contact owner-assignment date is used as the closest available proxy. "Speed to First Contact" and "Enquiries Contacted/Untouched" are name-matched between new leads and this period's call log (no clean lead↔call ID join is exposed by this integration) — treat as a close estimate, not an exact figure. Switch "View" to Sales Agent to drill into one rep's KPIs and per-metric trends.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<script>
+const OWNERS = [
+  { id: '33175505', name: 'Amy Andrade' },
+  { id: '32133440', name: 'Samuele Palamara' },
+  { id: '33760446', name: 'Kyle Yin' },
+  { id: '33001011', name: 'Tim Gamin' },
+  { id: '790812864', name: 'Diarnah Lynch' },
+  { id: '1337198788', name: 'Mark Meyer' },
+  { id: '1872661741', name: 'Thomas Murray' },
+  { id: '32677368', name: 'Lara Mathews' },
+  { id: '29790003', name: 'Liam Simpson' }
+];
+
+const REP_COLORS = ['#2563eb', '#0d9488', '#d97706', '#7c3aed', '#dc2626', '#059669', '#db2777', '#4f46e5', '#ca8a04'];
+
+function ownerColor(id) {
+  const i = OWNERS.findIndex(o => o.id === id);
+  return REP_COLORS[i % REP_COLORS.length];
+}
+
+const CALL_DISPOSITIONS = {
+  '9d9162e7-6cf3-4944-bf63-4dff82258764': 'Busy',
+  'f240bbac-87c9-4f6e-bf70-924b57d47db7': 'Connected',
+  'a4c4c377-d246-4b32-a13b-75a56a4cd0ff': 'Left live message',
+  'b2cf5968-551e-4856-9783-52b3da59a7d0': 'Left voicemail',
+  '73a0d17f-1163-4015-bdd5-ec830791da20': 'No answer',
+  '17b47fee-58de-441e-a44c-c6300d46f273': 'Wrong number'
+};
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+/* ---------- Loading ETA / countdown ----------
+   HubSpot's own rate limiting (not just this dashboard's MAX_CONCURRENT_QUERIES
+   cap) can slow a cold load, especially now that Book Health fans out to ~80
+   queries across 9 reps. Rather than leave the status line saying "Fetching…"
+   with no sense of how long that means, show a rough estimate up front and
+   count it down live. The estimate is a plain heuristic (query count ÷
+   concurrency × average observed seconds per query, including retry
+   backoff) — it can run over on a genuinely slow/rate-limited load, which the
+   countdown says plainly rather than silently sitting at 0. */
+const SEC_PER_QUERY_ESTIMATE = 2.2; // avg observed, including occasional 429 backoff
+
+function estimateSeconds(queryCount) {
+  return Math.max(5, Math.round((queryCount / MAX_CONCURRENT_QUERIES) * SEC_PER_QUERY_ESTIMATE));
+}
+
+function startCountdown(el, queryCount, prefix) {
+  const totalSec = estimateSeconds(queryCount);
+  let remaining = totalSec;
+  const render = () => {
+    if (remaining > 0) {
+      el.textContent = `${prefix} — usually takes about ${totalSec}s, ~${remaining}s remaining…`;
+    } else {
+      el.textContent = `${prefix} — running a little longer than the usual ${totalSec}s (HubSpot may be rate-limiting this session)…`;
+    }
+    remaining -= 1;
+  };
+  render();
+  return setInterval(render, 1000);
+}
+
+function stopCountdown(intervalId) {
+  if (intervalId) clearInterval(intervalId);
+}
+
+/* ---------- "Artifact is not currently shown" handling ----------
+   MCP calls from an artifact only go through while it's the visible/frontmost
+   view — if the user switches to another tab/panel mid-load (easy to do now
+   that Book Health can take 30-60s), every in-flight call fails with this
+   exact error. That's a platform restriction, not a bug in this page, so
+   there's nothing to retry-harder on; instead, detect it, say so plainly
+   instead of a generic failure, and automatically resume once the tab is
+   visible again rather than making the user manually hit refresh. */
+function isNotShownError(err) {
+  const msg = (err && err.message) ? err.message : String(err || '');
+  return /not currently shown/i.test(msg);
+}
+
+const pendingRetryOnVisible = { main: false, todayCalls: false, trend: false, weeklyTrend: false };
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (pendingRetryOnVisible.todayCalls) { pendingRetryOnVisible.todayCalls = false; loadTodayCalls(); }
+  if (pendingRetryOnVisible.trend) { pendingRetryOnVisible.trend = false; loadTrendData(); }
+  if (pendingRetryOnVisible.weeklyTrend) { pendingRetryOnVisible.weeklyTrend = false; loadWeeklyTrendData(); }
+  if (pendingRetryOnVisible.main) { pendingRetryOnVisible.main = false; loadAndRender(currentRangeKey); }
+});
+
+function daysAgoStr(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  const pad = x => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function formatDuration(ms) {
+  if (!ms || !isFinite(ms) || ms <= 0) return '—';
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function median(arr) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function mean(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
+
+function pct(n, d) { return d ? Math.round((n / d) * 100) : 0; }
+
+function formatHours(h) {
+  if (!isFinite(h) || h <= 0) return '—';
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 48) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
+
+function normalizeName(str) {
+  return String(str || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/* ---------- Session / range window math (same definitions as the ticker) ---------- */
+
+function atNineAm(d) { const c = new Date(d); c.setHours(9, 0, 0, 0); return c; }
+
+function daySessionFor(dateNear9am) {
+  const open = atNineAm(dateNear9am);
+  const close = new Date(open); close.setHours(17, 30, 0, 0);
+  const nextOpen = new Date(open); nextOpen.setDate(nextOpen.getDate() + 1); nextOpen.setHours(9, 0, 0, 0);
+  return {
+    openMs: open.getTime(), closeMs: close.getTime(), nextOpenMs: nextOpen.getTime(),
+    dateLabel: open.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  };
+}
+
+function currentSession() {
+  const now = new Date();
+  const openToday = atNineAm(now);
+  const open = now.getTime() >= openToday.getTime() ? openToday : (() => { const d = new Date(openToday); d.setDate(d.getDate() - 1); return d; })();
+  return daySessionFor(open);
+}
+
+/* Used to be businessDaySessions() and only generated a session for Mon-Fri,
+   silently excluding Saturday/Sunday from every multi-day range (This Week,
+   Last 14 Days, This Month, Last Month). That's a real bug, not a design
+   choice — confirmed directly against HubSpot: Amy Andrade booked 9 of 17
+   meetings this month on Saturdays (real-estate open-house "Live Caringbah"
+   inspections), and every one of them was silently dropped, undercounting
+   her to 6. Switched to a plain calendar-day model — midnight to midnight,
+   every day included — which also removes the old 9am anchor entirely (it
+   only ever mattered for excluding weekends; Today/Yesterday's own intraday
+   hour-bucketing above is unaffected and still anchors on 9am). */
+function midnightOf(d) { const c = new Date(d); c.setHours(0, 0, 0, 0); return c; }
+
+function calendarDaySession(dateAnyTime) {
+  const open = midnightOf(dateAnyTime);
+  const nextOpen = new Date(open); nextOpen.setDate(nextOpen.getDate() + 1);
+  return {
+    openMs: open.getTime(), nextOpenMs: nextOpen.getTime(),
+    dateLabel: open.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  };
+}
+
+function calendarDaySessions(fromDate, toDateInclusive) {
+  const sessions = [];
+  const cur = midnightOf(fromDate);
+  const end = midnightOf(toDateInclusive);
+  while (cur.getTime() <= end.getTime()) {
+    sessions.push(calendarDaySession(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return sessions;
+}
+
+function getRangeConfig(key) {
+  const now = new Date();
+  const nowMs = now.getTime();
+
+  if (key === 'today') {
+    const s = currentSession();
+    return { key, mode: 'intraday', sessions: [s], nowMs, label: 'Today' };
+  }
+  if (key === 'yesterday') {
+    const today = currentSession();
+    const yOpen = new Date(today.openMs); yOpen.setDate(yOpen.getDate() - 1);
+    const s = daySessionFor(yOpen);
+    return { key, mode: 'intraday', sessions: [s], nowMs: s.nextOpenMs, label: 'Yesterday' };
+  }
+  if (key === 'week' || key === 'lastWeek') {
+    const ref = new Date(now);
+    if (key === 'lastWeek') ref.setDate(ref.getDate() - 7);
+    const dow = ref.getDay();
+    const diffToMonday = (dow === 0 ? -6 : 1 - dow);
+    const monday = new Date(ref); monday.setDate(ref.getDate() + diffToMonday);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    const endDate = key === 'week' ? now : sunday;
+    const sessions = calendarDaySessions(monday, endDate);
+    return { key, mode: 'daily', sessions, nowMs, label: key === 'week' ? 'This Week' : 'Last Week' };
+  }
+  if (key === 'last14') {
+    const start = new Date(now); start.setDate(start.getDate() - 13);
+    const sessions = calendarDaySessions(start, now);
+    return { key, mode: 'daily', sessions, nowMs, label: 'Last 14 Days' };
+  }
+  if (key === 'month' || key === 'lastMonth') {
+    const ref = new Date(now);
+    if (key === 'lastMonth') ref.setMonth(ref.getMonth() - 1);
+    const first = new Date(ref.getFullYear(), ref.getMonth(), 1);
+    const last = new Date(ref.getFullYear(), ref.getMonth() + 1, 0);
+    const endDate = key === 'month' ? now : last;
+    const sessions = calendarDaySessions(first, endDate);
+    return { key, mode: 'daily', sessions, nowMs, label: key === 'month' ? 'This Month' : 'Last Month' };
+  }
+  return getRangeConfig('today');
+}
+
+/* Weekly trend range — 12 full Monday-Sunday weeks (this partial week
+   included), independent of the range tabs above, same pattern as
+   getRangeConfig('last14'). Kyle asked for "Calls Made (weekly)" and
+   "Meetings Booked (weekly)" trend lines with one dot per week, which the
+   existing 14-day daily trend can't show (14 days is only ~2 weeks) — this
+   is a separate, longer-window fetch built the same way. */
+const WEEKLY_TREND_WEEKS = 12;
+
+function weeklyRangeConfig() {
+  const now = new Date();
+  const dow = now.getDay();
+  const diffToMonday = (dow === 0 ? -6 : 1 - dow);
+  const thisMonday = new Date(now); thisMonday.setDate(now.getDate() + diffToMonday); thisMonday.setHours(0, 0, 0, 0);
+  const start = new Date(thisMonday); start.setDate(start.getDate() - 7 * (WEEKLY_TREND_WEEKS - 1));
+  const sessions = calendarDaySessions(start, now);
+  return { key: 'last12weeks', mode: 'daily', sessions, nowMs: now.getTime(), label: `Last ${WEEKLY_TREND_WEEKS} Weeks` };
+}
+
+function paddedSqlRange(rangeConfig) {
+  const opens = rangeConfig.sessions.map(s => s.openMs);
+  const nextOpens = rangeConfig.sessions.map(s => s.nextOpenMs);
+  const start = new Date(Math.min(...opens)); start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0);
+  const end = new Date(Math.max(...nextOpens)); end.setDate(end.getDate() + 1); end.setHours(0, 0, 0, 0);
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return { start: fmt(start), end: fmt(end) };
+}
+
+function inAnySession(ts, rangeConfig) {
+  return rangeConfig.sessions.some(s => ts >= s.openMs && ts <= Math.min(s.nextOpenMs, rangeConfig.nowMs));
+}
+
+/* ---------- HubSpot fetching (row-level queries) ---------- */
+
+const QUERY_TOOL = 'mcp__fa06d9cc-b3b9-4e63-a33e-89af872b44ba__query_crm_data';
+
+/* Global concurrency limiter. Book Health alone can fan out to ~40 queries
+   (9 reps × several per-owner metrics), plus the main activity fetch runs 7
+   paginated datasets at once — enough simultaneous calls to trip MCP-level
+   rate limiting. Cap how many HubSpot calls are in flight at once across the
+   whole dashboard; anything over the cap just waits its turn in a queue. */
+const MAX_CONCURRENT_QUERIES = 2;
+// A concurrency cap alone doesn't protect against a requests-PER-SECOND limit
+// — 2 slots that each refill instantly can still fire a new call the moment
+// one finishes, which is exactly what kept tripping the rate limit even after
+// dropping concurrency from 3 to 2. Add a floor on how soon a new call may
+// START after the previous one started, independent of the concurrency cap.
+const MIN_CALL_SPACING_MS = 450;
+let activeQueries = 0;
+let lastCallStartMs = 0;
+const queryWaitQueue = [];
+
+function acquireQuerySlot() {
+  return new Promise(resolve => {
+    const tryGo = () => {
+      if (activeQueries < MAX_CONCURRENT_QUERIES) {
+        const sinceLast = Date.now() - lastCallStartMs;
+        if (sinceLast < MIN_CALL_SPACING_MS) {
+          setTimeout(tryGo, MIN_CALL_SPACING_MS - sinceLast);
+          return;
+        }
+        activeQueries++;
+        lastCallStartMs = Date.now();
+        resolve();
+      } else {
+        queryWaitQueue.push(tryGo);
+      }
+    };
+    tryGo();
+  });
+}
+
+function releaseQuerySlot() {
+  activeQueries--;
+  const next = queryWaitQueue.shift();
+  if (next) next();
+}
+
+async function callHubSpotTool(args) {
+  await acquireQuerySlot();
+  try {
+    return await window.cowork.callMcpTool(QUERY_TOOL, args);
+  } finally {
+    releaseQuerySlot();
+  }
+}
+
+async function runQuery(sql) {
+  let lastErr;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) await sleep(1500 * attempt + Math.random() * 400);
+    const r = await callHubSpotTool({
+      sql,
+      verbosityLevel: 'LOW',
+      chatInsights: {
+        userIntent: 'Management dashboard: filterable team comparison and single-agent focus view over selectable ranges',
+        satisfaction: 'NEUTRAL'
+      }
+    });
+    if (r && r.isError) {
+      const msg = (r.content && r.content[0] && r.content[0].text) || 'HubSpot query failed';
+      lastErr = new Error(msg);
+      if (/rate limit/i.test(msg)) continue;
+      throw lastErr;
+    }
+    const data = r.structuredContent ?? JSON.parse(r.content[0].text);
+    const rows = (data.results || []).map(item => {
+      try { return JSON.parse(item.content).properties || {}; } catch (e) { return {}; }
+    });
+    return rows;
+  }
+  throw lastErr || new Error('HubSpot query failed after retries');
+}
+
+/* HubSpot caps LIMIT at 500 rows per call. Any of these datasets (especially
+   Calls, across 9 reps, over a Week/Month range) can easily exceed that, so
+   page through with OFFSET until a short page comes back. Capped at 20 pages
+   (10,000 rows) per dataset as a sanity ceiling. */
+const PAGE_SIZE = 500;
+const MAX_PAGES = 20;
+
+async function runQueryAllPages(baseSql) {
+  let all = [];
+  let offset = 0;
+  let truncated = false;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const rows = await runQuery(`${baseSql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`);
+    all = all.concat(rows);
+    if (rows.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+    if (page === MAX_PAGES - 1) truncated = true;
+  }
+  return { rows: all, truncated };
+}
+
+/* ---------- HubSpot fetching (aggregate / GROUP BY queries) ----------
+   These come back either as row-style JSON (same shape as runQuery) or as a
+   narrative text block with an embedded "Dataset TSV:" table, depending on
+   how the tool renders aggregates. Handle both. */
+
+function parseHeaderKey(h) {
+  const m = h.match(/\[(.*?)\]/);
+  return m ? m[1] : h.trim();
+}
+
+function normalizeEnumValue(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const m = String(v).match(/\(([^)]+)\)\s*$/);
+  return m ? m[1] : v;
+}
+
+async function runAggregateQuery(sql) {
+  let lastErr;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) await sleep(1500 * attempt + Math.random() * 400);
+    const r = await callHubSpotTool({
+      sql,
+      verbosityLevel: 'LOW',
+      chatInsights: {
+        userIntent: 'Management dashboard: book-of-business health snapshot (contacts, tasks, engagement mix) grouped by rep',
+        satisfaction: 'NEUTRAL'
+      }
+    });
+    if (r && r.isError) {
+      const msg = (r.content && r.content[0] && r.content[0].text) || 'HubSpot query failed';
+      lastErr = new Error(msg);
+      if (/rate limit/i.test(msg)) continue;
+      throw lastErr;
+    }
+
+    let data = null;
+    try { data = r.structuredContent ?? JSON.parse(r.content[0].text); } catch (e) { data = null; }
+
+    // The "Dataset TSV:" narrative can show up in two different places:
+    // nested inside data.results[0].content (already unescaped by JSON.parse,
+    // so its newlines are real) or directly as r.content[0].text (which, if we
+    // just parsed it AS json above, still has its newlines escaped as literal
+    // "\n" two-character sequences — searching that raw string for a real
+    // newline silently fails and returns no rows). Try the nested/unescaped
+    // source first.
+    const narrativeCandidates = [];
+    if (data && Array.isArray(data.results) && data.results.length && typeof data.results[0].content === 'string') {
+      try {
+        return data.results.map(item => JSON.parse(item.content).properties || {});
+      } catch (e) { /* not row-style JSON — it's narrative text, use it below */ }
+      narrativeCandidates.push(data.results[0].content);
+    }
+    if (r.content && r.content[0] && typeof r.content[0].text === 'string') {
+      narrativeCandidates.push(r.content[0].text);
+    }
+
+    for (const text of narrativeCandidates) {
+      const m = text.match(/Dataset TSV:\s*\n([\s\S]*)/);
+      if (m) {
+        const lines = m[1].trim().split('\n').filter(Boolean).filter(l => !/^Showing\s+\d+\s+of\s+\d+/i.test(l));
+        if (lines.length) {
+          const headers = lines[0].split('\t').map(parseHeaderKey);
+          return lines.slice(1).map(line => {
+            const cells = line.split('\t');
+            const obj = {};
+            headers.forEach((h, i) => { obj[h] = cells[i]; });
+            return obj;
+          });
+        }
+      }
+    }
+
+    return [];
+  }
+  throw lastErr || new Error('HubSpot query failed after retries');
+}
+
+/* A plain, non-grouped "SELECT COUNT(*) FROM ... WHERE ..." (no GROUP BY) comes
+   back as an empty results array with the number embedded in a sentence like
+   "The total count is 171." This is also the reliable escape hatch for cases
+   where GROUP BY produces wrong numbers (see runSingleCountQuery usage below):
+   HubSpot's query tool has been observed to over-count when a GROUP BY is
+   combined with a cross-object join filter (e.g. TASK.property on a CONTACT
+   query) — it appears to count joined task rows rather than distinct
+   contacts. Looping per-owner with a plain COUNT(*) avoids that entirely. */
+async function runSingleCountQuery(sql) {
+  let lastErr;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) await sleep(1500 * attempt + Math.random() * 400);
+    const r = await callHubSpotTool({
+      sql,
+      verbosityLevel: 'LOW',
+      chatInsights: {
+        userIntent: 'Management dashboard: exact per-rep distinct-contact count for a book-health condition, using a plain non-grouped COUNT(*) to avoid a known GROUP BY + cross-object join over-count bug',
+        satisfaction: 'DISSATISFIED'
+      }
+    });
+    if (r && r.isError) {
+      const msg = (r.content && r.content[0] && r.content[0].text) || 'HubSpot query failed';
+      lastErr = new Error(msg);
+      if (/rate limit/i.test(msg)) continue;
+      throw lastErr;
+    }
+
+    let data = null;
+    try { data = r.structuredContent ?? JSON.parse(r.content[0].text); } catch (e) { data = null; }
+
+    const nestedContent = (data && Array.isArray(data.results) && data.results[0] && typeof data.results[0].content === 'string')
+      ? data.results[0].content : null;
+
+    const textCandidates = [
+      data && data.instructions,
+      r.instructions,
+      nestedContent,
+      r.content && r.content[0] && r.content[0].text
+    ];
+
+    for (const t of textCandidates) {
+      if (typeof t === 'string') {
+        const m = t.match(/total count is\s+([\d,]+)/i);
+        if (m) return Number(m[1].replace(/,/g, '')) || 0;
+      }
+    }
+
+    if (nestedContent) {
+      try {
+        const props = JSON.parse(nestedContent).properties || {};
+        if (props.count !== undefined) return Number(props.count) || 0;
+      } catch (e) { /* ignore, not row-style JSON */ }
+    }
+
+    for (const t of textCandidates) {
+      if (typeof t !== 'string') continue;
+      const m2 = t.match(/Dataset TSV:\s*\n([\s\S]*)/);
+      if (m2) {
+        const lines = m2[1].trim().split('\n').filter(Boolean).filter(l => !/^Showing\s+\d+\s+of\s+\d+/i.test(l));
+        if (lines.length >= 2) {
+          const cells = lines[1].split('\t');
+          return Number(cells[cells.length - 1]) || 0;
+        }
+      }
+    }
+
+    return 0;
+  }
+  throw lastErr || new Error('HubSpot query failed after retries');
+}
+
+// HubSpot has two separate ID systems that usually — but not always —
+// coincide: an "owner" ID (used for assignment/hubspot_owner_id) and a
+// "user"/login ID (used for hs_created_by_user_id, whoever actually clicked
+// Create). Confirmed directly, same day Kyle pushed back on Thomas Murray's
+// "0 meetings booked" showing up while he insisted he books his own: his real
+// login ID is 64248901 — 741 meetings, every single one owned by him — a
+// completely different number than his owner ID 1872661741 that every
+// "Booked" query on this dashboard had been checking instead. Checked the
+// other "0 Booked" closers the same way: Diarnah Lynch has the same issue,
+// real login ID 50258835 (299 of her 300 meetings). Mark Meyer does NOT have
+// this fix available — his meetings mostly show hs_created_by_user_id as
+// flatly "Unassigned" (5,952 of ~6,414), which is missing data, not a hidden
+// ID, so there's nothing to alias for him.
+const REP_CREATOR_ALIASES = {
+  '1872661741': ['64248901'], // Thomas Murray
+  '790812864': ['50258835']   // Diarnah Lynch
+};
+
+function allCreatorIds() {
+  const ids = OWNERS.map(o => o.id);
+  Object.values(REP_CREATOR_ALIASES).forEach(aliases => ids.push(...aliases));
+  return ids;
+}
+
+// Maps a raw hs_created_by_user_id value back to the owner ID it really
+// belongs to, so a rep's real personal login ID (see REP_CREATOR_ALIASES
+// above) buckets under their normal owner ID instead of vanishing.
+function resolveCreatorOwnerId(rawId) {
+  for (const ownerId in REP_CREATOR_ALIASES) {
+    if (REP_CREATOR_ALIASES[ownerId].includes(rawId)) return ownerId;
+  }
+  return rawId;
+}
+
+function groupByOwner(rows, field = 'hubspot_owner_id', resolveId = null) {
+  const byId = {};
+  OWNERS.forEach(o => { byId[o.id] = []; });
+  rows.forEach(row => {
+    const id = resolveId ? resolveId(row[field]) : row[field];
+    if (byId[id]) byId[id].push(row);
+  });
+  return byId;
+}
+
+/* ---------- Local cache for closed date ranges ----------
+   "Yesterday," "Last Week," and "Last Month" describe periods that are
+   completely finished — the data behind them can't change, so re-running the
+   same 7-query fetch every time the user clicks that tab (or every time the
+   artifact is reopened) burns HubSpot queries for an answer that's already
+   settled. "Today," "This Week," "This Month," and the 14-day trend are still
+   in progress, so those are never cached and always fetch fresh.
+   Cache key bakes in the exact window boundaries (not just the range name),
+   so "Yesterday" automatically stops matching the cache the day after
+   tomorrow rolls around — no manual invalidation needed. */
+const CACHE_VERSION = 'v1';
+const CLOSED_RANGE_KEYS = new Set(['yesterday', 'lastWeek', 'lastMonth']);
+
+function cacheKeyFor(rangeConfig) {
+  const first = rangeConfig.sessions[0];
+  const last = rangeConfig.sessions[rangeConfig.sessions.length - 1];
+  return `dashCache:${CACHE_VERSION}:${rangeConfig.key}:${first.openMs}-${last.nextOpenMs}`;
+}
+
+function readRangeCache(rangeConfig) {
+  if (!CLOSED_RANGE_KEYS.has(rangeConfig.key)) return null;
+  try {
+    const raw = localStorage.getItem(cacheKeyFor(rangeConfig));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+function writeRangeCache(rangeConfig, results, truncated) {
+  if (!CLOSED_RANGE_KEYS.has(rangeConfig.key)) return;
+  try {
+    localStorage.setItem(cacheKeyFor(rangeConfig), JSON.stringify({ results, truncated, cachedAt: Date.now() }));
+  } catch (e) {
+    // Quota exceeded or storage unavailable — just skip caching this time,
+    // not worth failing the whole load over.
+  }
+}
+
+async function loadAll(rangeConfig) {
+  const cached = readRangeCache(rangeConfig);
+  if (cached) {
+    return { results: cached.results, truncated: cached.truncated, fromCache: true, cachedAt: cached.cachedAt };
+  }
+
+  const range = paddedSqlRange(rangeConfig);
+  const ownerIds = OWNERS.map(o => `'${o.id}'`).join(',');
+  const ownerFilter = `hubspot_owner_id IN (${ownerIds})`;
+  // Includes each rep's real login ID alias (see REP_CREATOR_ALIASES) so
+  // Thomas Murray's and Diarnah Lynch's own bookings actually get fetched
+  // instead of silently missing every meeting they created.
+  const creatorFilter = `hs_created_by_user_id IN (${allCreatorIds().map(id => `'${id}'`).join(',')})`;
+
+  const [callsRes, emailsRes, meetingsRes, notesRes, leadsRes, dealsRes, enquiriesRes] = await Promise.all([
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_call_title, hs_call_disposition, hs_call_duration, hs_timestamp FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_email_subject, hs_email_direction, hs_timestamp FROM EMAIL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
+    // Meetings are date-filtered by hs_createdate — when the agent actually
+    // did the booking — not hs_timestamp (which HubSpot sets to the
+    // meeting's SCHEDULED start time). Those two dates are often days or
+    // weeks apart (confirmed directly: one meeting was created April 23 for
+    // a May 2 slot). "Meetings Booked" is meant to measure the agent's
+    // booking activity in this period, so it has to key off when they set
+    // it up, not when the meeting happens to occur — otherwise a meeting
+    // booked today for next month wouldn't count until next month, and a
+    // meeting booked last month for today would count now instead of then.
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_created_by_user_id, hs_meeting_title, hs_meeting_outcome, hs_timestamp, hs_createdate FROM MEETING WHERE ${creatorFilter} AND hs_createdate BETWEEN '${range.start}' AND '${range.end}'`),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_note_body, hs_timestamp FROM NOTE WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, firstname, lastname, email, phone, lifecyclestage, hs_lead_status, createdate, notes_last_contacted FROM CONTACT WHERE ${ownerFilter} AND createdate BETWEEN '${range.start}' AND '${range.end}'`),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, dealname, dealstage, hs_lastmodifieddate FROM DEAL WHERE ${ownerFilter} AND hs_lastmodifieddate BETWEEN '${range.start}' AND '${range.end}'`),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hubspot_owner_assigneddate FROM CONTACT WHERE ${ownerFilter} AND hubspot_owner_assigneddate BETWEEN '${range.start}' AND '${range.end}'`)
+  ]);
+
+  const rawCalls = callsRes.rows, rawEmails = emailsRes.rows, rawMeetings = meetingsRes.rows,
+        rawNotes = notesRes.rows, rawLeads = leadsRes.rows, rawDeals = dealsRes.rows, rawEnquiries = enquiriesRes.rows;
+
+  const calls = rawCalls.filter(r => inAnySession(Number(r.hs_timestamp), rangeConfig));
+  const emails = rawEmails.filter(r => inAnySession(Number(r.hs_timestamp), rangeConfig));
+  const meetings = rawMeetings.filter(r => inAnySession(Number(r.hs_createdate), rangeConfig));
+  const notes = rawNotes.filter(r => inAnySession(Number(r.hs_timestamp), rangeConfig));
+  const leads = rawLeads.filter(r => inAnySession(Number(r.createdate), rangeConfig));
+  const deals = rawDeals.filter(r => inAnySession(Number(r.hs_lastmodifieddate), rangeConfig));
+  const enquiries = rawEnquiries.filter(r => inAnySession(Number(r.hubspot_owner_assigneddate), rangeConfig));
+
+  const truncated = [callsRes, emailsRes, meetingsRes, notesRes, leadsRes, dealsRes, enquiriesRes].some(r => r.truncated);
+
+  const callsByOwner = groupByOwner(calls);
+  const emailsByOwner = groupByOwner(emails);
+  const meetingsByOwner = groupByOwner(meetings, 'hs_created_by_user_id', resolveCreatorOwnerId);
+  const notesByOwner = groupByOwner(notes);
+  const leadsByOwner = groupByOwner(leads);
+  const dealsByOwner = groupByOwner(deals);
+  const enquiriesByOwner = groupByOwner(enquiries);
+
+  const results = OWNERS.map(owner => ({
+    owner,
+    calls: callsByOwner[owner.id],
+    emails: emailsByOwner[owner.id],
+    meetings: meetingsByOwner[owner.id],
+    notes: notesByOwner[owner.id],
+    leads: leadsByOwner[owner.id],
+    deals: dealsByOwner[owner.id],
+    enquiries: enquiriesByOwner[owner.id]
+  }));
+
+  writeRangeCache(rangeConfig, results, truncated);
+  return { results, truncated };
+}
+
+/* ---------- Today's Calls (always "today," independent of the range tabs) ----------
+   Answers "how many calls today, and how long were the connected ones" per
+   agent, without requiring the user to switch the range tabs to Today. */
+
+let todayCallsByOwner = null;
+let todayCallsLoading = false;
+let todayCallsError = null;
+
+/* ---------- Trend data (always "past 14 days," independent of the range
+   tabs) ----------
+   The mini-charts in Agent Focus used to bucket whatever range tab was
+   selected up top (so picking "Today" gave a single-point "trend"). That's
+   not a trend, that's a snapshot. Fixed to always show the last 14 calendar
+   days, fetched separately from the main range-tab data — same pattern as
+   loadTodayCalls() above, just reusing loadAll() with a pinned 'last14'
+   rangeConfig instead of writing a second bespoke fetch. */
+
+let trendResults = null;
+let trendRangeConfig = null;
+let trendLoading = false;
+let trendError = null;
+
+async function loadTrendData() {
+  trendLoading = true;
+  trendError = null;
+  renderAll();
+
+  try {
+    const rangeConfig = getRangeConfig('last14');
+    const { results, truncated } = await loadAll(rangeConfig);
+    rangeConfig.truncated = truncated;
+    trendResults = results;
+    trendRangeConfig = rangeConfig;
+  } catch (err) {
+    if (isNotShownError(err)) {
+      pendingRetryOnVisible.trend = true;
+      trendError = 'Paused — this happens when the artifact tab loses focus mid-load. It will resume automatically once this tab is visible again.';
+    } else {
+      trendError = err && err.message ? err.message : String(err);
+    }
+  } finally {
+    trendLoading = false;
+    renderAll();
+  }
+}
+
+/* ---------- Weekly trend data (always "past 12 weeks," independent of the
+   range tabs and of the 14-day daily trend above) ----------
+   Kyle asked for "Calls Made (weekly)" and "Meetings Booked (weekly)" on the
+   trend chart, with each dot as one week. The 14-day trend above can't show
+   that (14 days is under 2 full weeks), so this is a separate, wider fetch —
+   same pattern as loadTrendData(), just pinned to weeklyRangeConfig() instead
+   of 'last14'. */
+
+let weeklyTrendResults = null;
+let weeklyTrendRangeConfig = null;
+let weeklyTrendLoading = false;
+let weeklyTrendError = null;
+
+async function loadWeeklyTrendData() {
+  weeklyTrendLoading = true;
+  weeklyTrendError = null;
+  renderAll();
+
+  try {
+    const rangeConfig = weeklyRangeConfig();
+    const { results, truncated } = await loadAll(rangeConfig);
+    rangeConfig.truncated = truncated;
+    weeklyTrendResults = results;
+    weeklyTrendRangeConfig = rangeConfig;
+  } catch (err) {
+    if (isNotShownError(err)) {
+      pendingRetryOnVisible.weeklyTrend = true;
+      weeklyTrendError = 'Paused — this happens when the artifact tab loses focus mid-load. It will resume automatically once this tab is visible again.';
+    } else {
+      weeklyTrendError = err && err.message ? err.message : String(err);
+    }
+  } finally {
+    weeklyTrendLoading = false;
+    renderAll();
+  }
+}
+
+async function loadTodayCalls() {
+  todayCallsLoading = true;
+  todayCallsError = null;
+  renderAll();
+
+  try {
+    const rangeConfig = getRangeConfig('today');
+    const range = paddedSqlRange(rangeConfig);
+    const ownerIds = OWNERS.map(o => `'${o.id}'`).join(',');
+    const ownerFilter = `hubspot_owner_id IN (${ownerIds})`;
+
+    const { rows: rawCalls } = await runQueryAllPages(
+      `SELECT hs_object_id, hubspot_owner_id, hs_call_disposition, hs_call_duration, hs_timestamp FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`
+    );
+    const calls = rawCalls.filter(r => inAnySession(Number(r.hs_timestamp), rangeConfig));
+    const callsByOwner = groupByOwner(calls);
+
+    const byOwner = {};
+    OWNERS.forEach(o => {
+      const ownerCalls = callsByOwner[o.id] || [];
+      const total = ownerCalls.length;
+      const connectedCalls = ownerCalls.filter(c => CALL_DISPOSITIONS[c.hs_call_disposition] === 'Connected');
+      const connected = connectedCalls.length;
+      const connectRate = total ? Math.round((connected / total) * 100) : 0;
+      const durations = connectedCalls.map(c => Number(c.hs_call_duration) || 0).filter(d => d > 0);
+      const totalDurationMs = durations.reduce((a, b) => a + b, 0);
+      byOwner[o.id] = {
+        total, connected, connectRate,
+        avgDurationMs: durations.length ? totalDurationMs / durations.length : 0,
+        medianDurationMs: median(durations),
+        totalDurationMs,
+        // Raw calls kept (not just the aggregate stats above) so the Agent
+        // Focus "Calls by Hour Today" bar chart can bucket them by hour
+        // without a second fetch — this function already pulls every one of
+        // today's calls, no reason to fetch them twice.
+        calls: ownerCalls
+      };
+    });
+
+    todayCallsByOwner = byOwner;
+  } catch (err) {
+    if (isNotShownError(err)) {
+      pendingRetryOnVisible.todayCalls = true;
+      todayCallsError = 'Paused — this happens when the artifact tab loses focus mid-load. It will resume automatically once this tab is visible again.';
+    } else {
+      todayCallsError = err && err.message ? err.message : String(err);
+    }
+  } finally {
+    todayCallsLoading = false;
+    renderAll();
+  }
+}
+
+function formatDurationLong(ms) {
+  if (!ms || !isFinite(ms) || ms <= 0) return '—';
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function computeCallStatsFromCalls(calls) {
+  const total = calls.length;
+  const connectedCalls = calls.filter(c => CALL_DISPOSITIONS[c.hs_call_disposition] === 'Connected');
+  const connected = connectedCalls.length;
+  const connectRate = total ? Math.round((connected / total) * 100) : 0;
+  const durations = connectedCalls.map(c => Number(c.hs_call_duration) || 0).filter(d => d > 0);
+  const totalDurationMs = durations.reduce((a, b) => a + b, 0);
+  return {
+    total, connected, connectRate,
+    avgDurationMs: durations.length ? totalDurationMs / durations.length : 0,
+    medianDurationMs: median(durations),
+    totalDurationMs
+  };
+}
+
+function renderTodayCallsTable() {
+  const body = document.getElementById('todayCallsBody');
+  const note = document.getElementById('todayCallsNote');
+
+  // When the range tab is already on "Today," reuse Team Comparison's own
+  // fetched calls directly instead of relying on this panel's separate fetch.
+  // Two independent queries for the same thing can drift apart the moment
+  // either one gets refreshed (or enough real time passes) while the other
+  // doesn't — sharing the data makes that impossible while "Today" is active.
+  const useShared = currentRangeKey === 'today' && !!lastResults;
+
+  if (!useShared) {
+    if (todayCallsLoading && !todayCallsByOwner) {
+      body.innerHTML = '<tr><td colspan="7" style="color:#9ca3af;">Loading today\'s calls…</td></tr>';
+      note.textContent = '';
+      return;
+    }
+    if (todayCallsError) {
+      body.innerHTML = `<tr><td colspan="7" style="color:#b91c1c;">Could not load today's calls: ${escapeHtml(todayCallsError)}</td></tr>`;
+      note.textContent = '';
+      return;
+    }
+    if (!todayCallsByOwner) { body.innerHTML = ''; note.textContent = ''; return; }
+  }
+
+  const byOwner = {};
+  if (useShared) {
+    lastResults.forEach(r => { byOwner[r.owner.id] = computeCallStatsFromCalls(r.calls); });
+  } else {
+    OWNERS.forEach(o => { byOwner[o.id] = todayCallsByOwner[o.id]; });
+  }
+
+  const currentIds = getActiveOwnerIds();
+  const rows = OWNERS.filter(o => currentIds.has(o.id)).map(o => ({ owner: o, color: ownerColor(o.id), ...byOwner[o.id] }));
+
+  const rateBar = (p) => `<div class="rate-cell"><div class="rate-track"><div class="rate-fill${p < 40 ? ' low' : ''}" style="width:${p}%"></div></div>${p}%</div>`;
+
+  const totals = rows.reduce((acc, r) => {
+    acc.total += r.total; acc.connected += r.connected; acc.totalDurationMs += r.totalDurationMs;
+    return acc;
+  }, { total: 0, connected: 0, totalDurationMs: 0 });
+  const totalConnectRate = totals.total ? Math.round((totals.connected / totals.total) * 100) : 0;
+
+  const bodyRows = rows.map(r => `
+    <tr>
+      <td><div class="rep-cell"><span class="rep-dot" style="background:${r.color}"></span>${escapeHtml(r.owner.name)}</div></td>
+      <td>${r.total}</td>
+      <td>${r.connected}</td>
+      <td>${rateBar(r.connectRate)}</td>
+      <td>${formatDuration(r.avgDurationMs)}</td>
+      <td>${formatDuration(r.medianDurationMs)}</td>
+      <td>${formatDurationLong(r.totalDurationMs)}</td>
+    </tr>`).join('');
+
+  const totalRow = rows.length ? `
+    <tr class="total-row">
+      <td>Filtered Total</td>
+      <td>${totals.total}</td>
+      <td>${totals.connected}</td>
+      <td>${rateBar(totalConnectRate)}</td>
+      <td>—</td>
+      <td>—</td>
+      <td>${formatDurationLong(totals.totalDurationMs)}</td>
+    </tr>` : '';
+
+  body.innerHTML = (bodyRows || '<tr><td colspan="7" style="color:#9ca3af;">No reps selected.</td></tr>') + totalRow;
+  const asOf = `as of ${new Date().toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  note.textContent = useShared
+    ? `Sharing Team Comparison's "Today" data (guaranteed to match) — ${asOf}. Talk Time only reflects calls where the dialer logged a duration.`
+    : (todayCallsLoading
+      ? 'Refreshing…'
+      : `Independently fetched (the range tab above isn't on Today) — ${asOf}. Talk Time only reflects calls where the dialer logged a duration. Click Refresh for the latest.`);
+}
+
+/* "Meetings Booked/Attended (Lifetime)" — lazy-loaded per agent (only when
+   that agent's Focus view is open), cached per rep. Uses hs_created_by_user_id
+   on the MEETING object, the same creator attribution already used for the
+   reliable period-scoped "Meetings Booked" KPI above it — a single-object,
+   non-grouped count with no cross-object join, so there's nothing for it to
+   over-count. (This used to also show a "Book Contacts With Any Meeting on
+   File" / Qualified breakdown computed from the CONTACT side via
+   hubspot_owner_id + associations.MEETING IS NOT NULL — that counted every
+   contact currently in a rep's book with a meeting logged by ANYONE, not
+   just this rep, and badly overstated things: confirmed directly against
+   Amy Andrade, whose book showed 332 "contacts with a meeting" against only
+   75 meetings she actually created. Removed as not useful.) */
+const qualifiedBreakdownCache = {};
+const qualifiedBreakdownLoading = {};
+
+// These two reps are pure setters — confirmed by the team: they book
+// meetings for other reps to host and never host themselves. HubSpot's
+// hubspot_owner_id field on a MEETING often never gets reassigned away
+// from whoever created it, so a naive hubspot_owner_id count for these two
+// looks like they "host" every meeting they book, which isn't real. We hide
+// the Hosted card for them rather than show a wrong number. (Verified
+// directly: pulled Amy's and Samuele's booked meetings and found the
+// hubspot_owner_id stuck on them even when the meeting title names another
+// rep as the actual closer, e.g. "...& Liam Simpson" / "...& Thomas Murray".)
+const SETTER_ONLY_IDS = ['33175505', '32133440']; // Amy Andrade, Samuele Palamara
+
+// Results of manual "run the HubSpot reconciliation for [rep]" checks (see
+// dashboard-verification-tests.md for the recipe). Not live — has to be
+// re-run and this object updated by hand whenever someone asks for a fresh
+// check, hence the date stamp. Cross-checks the rep's raw Meeting-record
+// count against HubSpot's email confirmation/cancellation trail, which
+// catches appointments whose Meeting object got dropped on cancel/reschedule
+// but still left a trace in Emails/Calls/Tasks.
+// Restructured (2026-07-21) so a rep can have a reconciliation on BOTH sides
+// — Booked and Hosted — at once. Tim Gamin needed this: he's primarily a
+// booker (like Sam/Amy) but also picks up ghost-hosted meetings (like
+// Lara/Thomas). The old flat shape (one method/metric per rep) couldn't
+// represent that. Each rep's entry is now { booked: {...} | null, hosted:
+// {...} | null }, and the card renderer below checks each side independently.
+const RECONCILED_BOOKINGS = {
+  '32133440': { // Samuele Palamara
+    booked: {
+      method: 'spreadsheet',
+      reconciledCount: 156,
+      spreadsheetTotal: 161,
+      misattributed: 2,
+      trueGaps: 3,
+      asOf: '2026-07-21',
+      note: '156 of his 161-row personal log matched to something in HubSpot (128 raw Meeting records + his deduped email trail, combined). 2 more (Jyoti Lakhani, Rahul Mishra) exist in HubSpot too, just booked under a different creator ID, not a gap. Only 3 have zero trace anywhere in HubSpot (Jovanka Mancevski, Izzy Gilmore, Henry Caldwell).'
+    },
+    hosted: null
+  },
+  // Amy and Lara don't have a personal spreadsheet like Sam's, so this checks
+  // the same thing a different way: combine each rep's raw Meeting count with
+  // her deduped BAP-pattern email trail to see if the email side recovers any
+  // appointments the Meeting table is missing (Sam's problem — objects
+  // disappearing on cancel).
+  '33175505': { // Amy Andrade
+    booked: {
+      method: 'spreadsheet', // upgraded from the email-trail "total" method
+      // once Kyle sent her actual personal appointment log (2026-07-21) —
+      // same source type Sam's reconciliation used from the start.
+      reconciledCount: 74,
+      spreadsheetTotal: 75,
+      recoveredViaEmail: 1,
+      extraUnlogged: 1, // real Meetings that exist in HubSpot but never made
+      // it into her personal log at all — the mirror-image gap. Confirmed by
+      // matching in BOTH directions: 74 names are common to both her
+      // spreadsheet and her 75 raw Meetings; 1 spreadsheet row (Jennie Hain)
+      // has no Meeting; separately, 1 raw Meeting (Rachael Surr & Thomas
+      // Murray) has no spreadsheet row. 74 + 1 + 1 = 76 distinct real
+      // appointments, not 75 either way you count it alone.
+      trueGaps: 0,
+      asOf: '2026-07-21',
+      note: 'Total Actual Meetings Booked: 76 — not 75, and not for the reason the raw count alone would suggest. Cross-checked her real 75-row personal log ("Amy Andrade Appointment Outcomes.xlsx") against HubSpot in both directions. 74 names are common to both: her spreadsheet and her 75 raw Meeting records. The 75th spreadsheet row, Jennie Hain (booked for Tom Murray), has ZERO Meeting record anywhere — but is fully confirmed real via 5 emails (booked May 26, cancelled June 3) — same disappearing-Meeting-record bug Sam has, just recovered here instead of left as an unknown. Separately, 1 of her 75 raw Meetings (Rachael Surr & Thomas Murray) has no row in her spreadsheet at all — a real booking she simply never logged personally. 74 (common) + 1 (Jennie Hain, log-only) + 1 (Rachael Surr, HubSpot-only) = 76. This overturns the earlier "75, no gap" conclusion from the email-only check, which missed Jennie Hain specifically because that booking\'s email subject didn\'t contain "BAP" (it was titled "Live Caringbah"), and the earlier check only searched BAP-pattern subjects. Lesson repeated from Sam/Lara: a narrow subject-line filter can hide a real gap just as easily as only checking one creator ID can.'
+    },
+    hosted: null
+  },
+  '32677368': { // Lara Mathews
+    booked: null, // her real Booked number is 164 (self-booked, shown live) — no
+    // spreadsheet/full email-trail check has been run on her Booked side yet
+    hosted: {
+      method: 'total',
+      reconciledTotal: 217,
+      rawMeetings: 164,
+      ghostHosted: 50,
+      trueGaps: 3,
+      asOf: '2026-07-21',
+      note: 'Total Actual Meetings Hosted: 217 (this is a hosted/closed count, not a booked count — her real Booked number is still 164, shown above). Breakdown: 164 self-booked (creator=Lara, owner=Lara, so Booked and Hosted coincide) + 50 more real meetings where hs_attendee_owner_ids confirms she\'s the actual closer, but Sam/Tim/Amy created the record and the owner field stayed on them — invisible to her Hosted number entirely, not just "a bit low" the way the general caveat below describes it. Confirmed by searching hs_attendee_owner_ids CONTAINS her ID across every creator, not just hers. 3 more (Supriya Amgai, Kereen Rodrigo, Praveen Chananna) have zero trace anywhere — no Meeting under any creator, checked directly — the only true unknowns. Correction on top of a correction: an earlier pass here called 18 names "confirmed missing" after only searching Meetings created by Lara herself; nearly all 18 turned out to be real meetings, just filed entirely under a different rep\'s creator ID.'
+    }
+  },
+  '1872661741': { // Thomas Murray
+    booked: null, // his real Booked number is 740 (self-booked via his real
+    // login ID alias) — no spreadsheet/full email-trail check has been run yet
+    hosted: {
+      method: 'total',
+      reconciledTotal: 805,
+      rawMeetings: 740,
+      ghostHosted: 65,
+      asOf: '2026-07-21',
+      note: 'Total Actual Meetings Hosted: 805. Breakdown: 740 self-booked (creator=his real login ID 64248901, owner=Thomas, so Booked and Hosted already coincide here — confirmed via COUNT(*) WHERE hubspot_owner_id=\'1872661741\' = 740, matching the creator-side count exactly) + 65 more real meetings where hs_attendee_owner_ids confirms Thomas is the actual attendee/closer, but Amy (33175505) or Sam (32133440) created the record and the owner field stayed on them — invisible to his Hosted number entirely. This is exactly the scenario Kyle described ("Sam and Amy books for Thomas") — it just wasn\'t showing up because it lives in hs_attendee_owner_ids, not hubspot_owner_id or hs_created_by_user_id. Confirmed by searching hs_attendee_owner_ids CONTAINS 1872661741 across every creator except his own two IDs. Not yet checked for true zero-trace unknowns the way Lara\'s was (no spreadsheet/email trail to cross-check against for Thomas), so no trueGaps figure here.'
+    }
+  },
+  '33001011': { // Tim Gamin — has BOTH sides reconciled, the first rep who does.
+    booked: {
+      method: 'total',
+      reconciledTotal: 92,
+      rawMeetings: 89,
+      misattributed: 3,
+      trueGaps: 4,
+      asOf: '2026-07-21',
+      note: 'Total Actual Meetings Booked: 92. Deduped his 125 BAP-pattern emails to 60 distinct real appointments; 45 matched his own 89 self-created Meetings directly. Of the 15 that didn\'t: 5 (Monya Robb, Lily Ho, Scott Li, Cristian Sylvestre, Andre Lahoiud) are meetings Sam actually booked with Tim as the real attendee — already counted in Tim\'s Hosted/ghost-hosted total below, not his own booking, correctly excluded here. 3 more (Salah Kahlifa, Dan Park, "Diarnah Lynch & Chloe") are other reps\' clients (Mark Meyer\'s, Diarnah\'s) that Tim was just copied on — not his bookings, excluded. Of the remaining 7 that are genuinely his own clients: 3 (Gigi Gouw, Shahin Oftadeh, Steven Cirson) DO have a real Meeting record in HubSpot, just filed under a different creator (Kyle Yin, Sam) — counted as misattributed, added to the 89 raw. 4 (Pooja Shevade, Li Lien Chua, Hazmal Zamri, Aida Khoshvaght) have zero Meeting record anywhere under any creator — true gaps, not included in the 92.'
+    },
+    hosted: {
+      method: 'total',
+      reconciledTotal: 106,
+      rawMeetings: 90,
+      ghostHosted: 16,
+      asOf: '2026-07-21',
+      note: 'Total Actual Meetings Hosted: 106. Breakdown: 90 raw (owner=Tim, hubspot_owner_id=\'33001011\') + 16 more real meetings where hs_attendee_owner_ids confirms Tim is the actual attendee/closer, but Sam (mostly), Liam, or a back-office ID (60605153) created the record and the owner field stayed on them. Screened out 2 items from the raw 18-result search that aren\'t real client meetings: a duplicate record (two near-identical "BAP - Sky - Andre Lahoiud" entries created 22 seconds apart, clearly a double-submit — counted once) and the team-wide "END OF QUARTER EVENT - RSVP!!!!" (not a client appointment). Not yet checked for true zero-trace unknowns on the Hosted side, so no trueGaps figure here.'
+    }
+  },
+  '29790003': { // Liam Simpson
+    booked: null,
+    hosted: {
+      method: 'total',
+      reconciledTotal: 515,
+      rawMeetings: 476,
+      ghostHosted: 39,
+      asOf: '2026-07-21',
+      note: 'Total Actual Meetings Hosted: 515. Breakdown: 476 raw (owner=Liam, hubspot_owner_id=\'29790003\') + 39 more real meetings where hs_attendee_owner_ids confirms Liam is the actual attendee/closer, but Amy (mostly), Sam, Thomas, or a back-office ID (60605153) created the record and the owner field stayed on them. Screened out 4 items from the raw 43-result search that aren\'t real client meetings: 3 team-wide events ("END OF QUARTER EVENT," "MPC Team - Melbourne Cup 2025," "Landmark Christmas Party 2025") and 1 logistics-only meeting ("Provide Access to B103 Greens," not a client sales appointment). Cancelled meetings that still have a surviving record (e.g. "CANCELLED: Live Caringbah - Jacob Ooi & Liam Simpson") were kept, same treatment as everywhere else on this dashboard. Not yet checked for true zero-trace unknowns (no spreadsheet/email trail to cross-check against for Liam), so no trueGaps figure here.'
+    }
+  }
+};
+
+async function loadQualifiedBreakdown(ownerId) {
+  if (qualifiedBreakdownCache[ownerId] || qualifiedBreakdownLoading[ownerId]) return;
+  qualifiedBreakdownLoading[ownerId] = true;
+  const isSetterOnly = SETTER_ONLY_IDS.includes(ownerId);
+
+  try {
+    // Two different roles show up on this team: setters who BOOK meetings
+    // (hs_created_by_user_id) and closers who HOST/RUN them but never create
+    // the record themselves (hubspot_owner_id). Confirmed directly: Thomas
+    // Murray has 0 meetings as creator but 738 as owner — he's purely a
+    // closer, and would show a flat, misleading zero without this second set.
+    // Include this rep's real login-ID alias if they have one (Thomas
+    // Murray, Diarnah Lynch — see REP_CREATOR_ALIASES) so their own bookings
+    // actually get counted instead of silently showing 0.
+    const creatorIds = [ownerId, ...(REP_CREATOR_ALIASES[ownerId] || [])];
+    const creatorIn = creatorIds.map(id => `'${id}'`).join(',');
+    const bookedQueries = [
+      runSingleCountQuery(`SELECT COUNT(*) FROM MEETING WHERE hs_created_by_user_id IN (${creatorIn})`),
+      runSingleCountQuery(`SELECT COUNT(*) FROM MEETING WHERE hs_created_by_user_id IN (${creatorIn}) AND hs_meeting_outcome = 'COMPLETED'`),
+      runSingleCountQuery(`SELECT COUNT(*) FROM MEETING WHERE hs_created_by_user_id IN (${creatorIn}) AND hs_meeting_outcome = 'NO_SHOW'`)
+    ];
+    const [meetingsBooked, meetingsAttended, meetingsNoShow] = await Promise.all(bookedQueries);
+
+    let meetingsHosted = null, meetingsHostedCompleted = null, meetingsHostedNoShow = null;
+    if (!isSetterOnly) {
+      [meetingsHosted, meetingsHostedCompleted, meetingsHostedNoShow] = await Promise.all([
+        runSingleCountQuery(`SELECT COUNT(*) FROM MEETING WHERE hubspot_owner_id = '${ownerId}'`),
+        runSingleCountQuery(`SELECT COUNT(*) FROM MEETING WHERE hubspot_owner_id = '${ownerId}' AND hs_meeting_outcome = 'COMPLETED'`),
+        runSingleCountQuery(`SELECT COUNT(*) FROM MEETING WHERE hubspot_owner_id = '${ownerId}' AND hs_meeting_outcome = 'NO_SHOW'`)
+      ]);
+    }
+    qualifiedBreakdownCache[ownerId] = { meetingsBooked, meetingsAttended, meetingsNoShow, meetingsHosted, meetingsHostedCompleted, meetingsHostedNoShow, isSetterOnly, error: null };
+  } catch (err) {
+    qualifiedBreakdownCache[ownerId] = { error: err && err.message ? err.message : String(err) };
+  } finally {
+    delete qualifiedBreakdownLoading[ownerId];
+    renderAll();
+  }
+}
+
+/* ---------- Book Health (Contacted vs. Untouched, lifetime) ----------
+   Kyle asked for this back — a per-rep view of their whole contact book (not
+   just this period's new leads, which "Speed to 1st Contact"/"New Leads
+   Contacted" above already cover), split into contacts THIS REP has
+   personally logged at least one touch against versus contacts with zero
+   footprint from them specifically.
+
+   First cut of this used the notes_last_contacted rollup property, but that
+   flips to "contacted" the moment ANYONE logs a touch on the contact — a
+   contact worked entirely by a teammate would wrongly count as "contacted"
+   for this rep too. Kyle caught that: "the untouched needs to be just to
+   this rep." Fixed using HubSpot's cross-object filter instead
+   (OBJECT.property inside WHERE, confirmed directly against live data:
+   CALL.hubspot_owner_id = '<id>' only matches calls actually owned by that
+   rep) — a contact counts as touched here only if a Call, Email, Note, or
+   Meeting *this specific rep* created is associated with it.
+
+   The query engine caps cross-object filters at 2 associated types per
+   query, so this runs as two OR'd pairs (Call-or-Email, Note-or-Meeting)
+   instead of one 4-way OR, then unions the resulting contact IDs client-side
+   — same row-fetch-and-union pattern used everywhere else on this dashboard,
+   just applied to IDs instead of activity rows. Meetings use the creator ID
+   (hs_created_by_user_id, plus each rep's real login alias from
+   REP_CREATOR_ALIASES) rather than hubspot_owner_id, matching how meetings
+   are attributed everywhere else here — HubSpot often never reassigns a
+   meeting's owner field away from whoever created it.
+
+   Lazy-loaded per agent (only when that agent's Focus view is open), same
+   pattern as loadQualifiedBreakdown above — a whole-book fetch for 9 reps up
+   front would be needless queries for tabs that are never opened. */
+const bookHealthCache = {};
+const bookHealthLoading = {};
+
+async function loadBookHealth(ownerId) {
+  if (bookHealthCache[ownerId] || bookHealthLoading[ownerId]) return;
+  bookHealthLoading[ownerId] = true;
+  try {
+    const meetingCreatorIds = [ownerId, ...(REP_CREATOR_ALIASES[ownerId] || [])];
+    const meetingCreatorIn = meetingCreatorIds.map(id => `'${id}'`).join(',');
+
+    const [totalContacts, callEmailRes, noteMeetingRes] = await Promise.all([
+      runSingleCountQuery(`SELECT COUNT(*) FROM CONTACT WHERE hubspot_owner_id = '${ownerId}'`),
+      runQueryAllPages(`SELECT hs_object_id FROM CONTACT WHERE hubspot_owner_id = '${ownerId}' AND (CALL.hubspot_owner_id = '${ownerId}' OR EMAIL.hubspot_owner_id = '${ownerId}')`),
+      runQueryAllPages(`SELECT hs_object_id FROM CONTACT WHERE hubspot_owner_id = '${ownerId}' AND (NOTE.hubspot_owner_id = '${ownerId}' OR MEETING.hs_created_by_user_id IN (${meetingCreatorIn}))`)
+    ]);
+
+    const touchedIds = new Set();
+    callEmailRes.rows.forEach(r => { if (r.hs_object_id) touchedIds.add(r.hs_object_id); });
+    noteMeetingRes.rows.forEach(r => { if (r.hs_object_id) touchedIds.add(r.hs_object_id); });
+
+    const contacted = touchedIds.size;
+    const untouched = Math.max(0, totalContacts - contacted);
+    const truncated = callEmailRes.truncated || noteMeetingRes.truncated;
+
+    bookHealthCache[ownerId] = { totalContacts, contacted, untouched, truncated, error: null };
+  } catch (err) {
+    bookHealthCache[ownerId] = { error: err && err.message ? err.message : String(err) };
+  } finally {
+    delete bookHealthLoading[ownerId];
+    renderAll();
+  }
+}
+
+function renderBookHealthGrid(ownerId) {
+  const grid = document.getElementById('bookHealthKpiGrid');
+  const caveat = document.getElementById('bookHealthCaveat');
+  if (!bookHealthCache[ownerId]) loadBookHealth(ownerId);
+  const cached = bookHealthCache[ownerId];
+
+  if (!cached) {
+    grid.innerHTML = '<div class="note">Loading book health… usually takes a few seconds.</div>';
+    caveat.textContent = '';
+    return;
+  }
+  if (cached.error) {
+    grid.innerHTML = `<div class="caveat">Could not load book health: ${escapeHtml(cached.error)}</div>`;
+    caveat.textContent = '';
+    return;
+  }
+
+  const untouchedRate = pct(cached.untouched, cached.totalContacts);
+  const contactedRate = pct(cached.contacted, cached.totalContacts);
+
+  grid.innerHTML = [
+    { label: 'Total Contacts in Book', value: cached.totalContacts },
+    { label: 'Contacted', value: cached.contacted, sub: `${contactedRate}% of book — by this rep` },
+    { label: 'Untouched', value: cached.untouched, sub: `${untouchedRate}% of book — zero footprint from this rep` }
+  ].map(c => `
+    <div class="kpi-card">
+      <div class="kpi-label">${escapeHtml(c.label)}</div>
+      <div class="kpi-value">${c.value}</div>
+      ${c.sub ? `<div class="kpi-sub">${escapeHtml(c.sub)}</div>` : ''}
+    </div>`).join('');
+
+  caveat.textContent = (cached.truncated ? '⚠ Extremely large touched-contact set (10,000+) for at least one engagement type — counts could be a slight undercount. ' : '')
+    + '"Untouched" = zero Calls, Emails, Notes, or Meetings that THIS rep personally logged against the contact — a contact worked entirely by a teammate counts as untouched here, even if it\'s fully engaged by someone else. Meetings are matched by creator, not by owner, same as "Meetings Booked" elsewhere on this dashboard. Book size and touch status are both all-time, unbounded by the range tabs above.';
+}
+
+/* ---------- Metrics ---------- */
+
+// Note: New Leads / Enquiries were removed from this list per Kyle's request
+// (the Trend mini-charts only, not the Agent Focus KPI cards further up,
+// which still show those two separately).
+const METRICS = [
+  { key: 'calls', label: 'Calls Made', count: (r, s, e) => r.calls.filter(c => within(c.hs_timestamp, s, e)).length },
+  { key: 'connected', label: 'Calls Connected', count: (r, s, e) => r.calls.filter(c => within(c.hs_timestamp, s, e) && CALL_DISPOSITIONS[c.hs_call_disposition] === 'Connected').length },
+  { key: 'emailsSent', label: 'Emails Sent', count: (r, s, e) => r.emails.filter(x => within(x.hs_timestamp, s, e) && (x.hs_email_direction || '').toUpperCase() === 'EMAIL').length },
+  { key: 'meetingsBooked', label: 'Meetings Booked', count: (r, s, e) => r.meetings.filter(m => within(m.hs_createdate, s, e)).length }
+];
+
+// Weekly trend only shows Calls Made and Meetings Booked, per Kyle's request
+// — reuses the same METRICS entries/counters above rather than duplicating
+// the counting logic, just applied over weekly buckets instead of daily ones.
+const WEEKLY_METRICS = METRICS.filter(m => m.key === 'calls' || m.key === 'meetingsBooked');
+
+function within(val, s, e) { const t = Number(val); return t >= s && t <= e; }
+
+/* ---------- Speed to First Contact & Enquiry Coverage (client-side, no extra fetch) ----------
+   No clean lead↔call ID join is exposed by this integration (confirmed
+   repeatedly across this account), so this name-matches each new lead
+   (firstname+lastname) against this period's already-loaded call log
+   (hs_call_title, which HubSpot fills in as "Call with <contact name>") to
+   find that lead's earliest logged call, then diffs it from createdate. Only
+   leads with a usable name and at least one matching call are counted —
+   treat the result as a close estimate, not an exact figure, and note the
+   match rate alongside it so it's clear how much of the period it covers. */
+function computeSpeedToFirstContact(rep) {
+  const leads = rep.leads || [];
+  const calls = rep.calls || [];
+  const callsByName = [];
+  calls.forEach(c => {
+    const title = normalizeName((c.hs_call_title || '').replace(/^call with\s*/i, ''));
+    if (title && title !== 'unknown contact') callsByName.push({ name: title, ts: Number(c.hs_timestamp) });
+  });
+
+  const deltasHours = [];
+  let matched = 0;
+  let contacted = 0;
+
+  leads.forEach(l => {
+    const name = normalizeName([l.firstname, l.lastname].filter(Boolean).join(' '));
+    const createdate = Number(l.createdate);
+    if (l.notes_last_contacted) contacted++;
+    if (!name || !isFinite(createdate)) return;
+    const candidateCalls = callsByName.filter(c => c.name === name || (c.name.length > 2 && name.includes(c.name)) || (name.length > 2 && c.name.includes(name)));
+    if (!candidateCalls.length) return;
+    const firstCallTs = Math.min(...candidateCalls.map(c => c.ts));
+    if (firstCallTs >= createdate) {
+      deltasHours.push((firstCallTs - createdate) / 3600000);
+      matched++;
+    }
+  });
+
+  return {
+    totalLeads: leads.length,
+    matched,
+    contacted,
+    untouched: Math.max(0, leads.length - contacted),
+    medianHours: median(deltasHours),
+    avgHours: mean(deltasHours)
+  };
+}
+
+/* ---------- Shared per-rep stat computation (this period, activity-based) ---------- */
+
+function computeRepStats(r) {
+  const calls = r.calls.length;
+  const connectedCalls = r.calls.filter(c => CALL_DISPOSITIONS[c.hs_call_disposition] === 'Connected');
+  const connected = connectedCalls.length;
+  const connectRate = calls ? Math.round((connected / calls) * 100) : 0;
+  const connectedDurations = connectedCalls.map(c => Number(c.hs_call_duration) || 0).filter(d => d > 0);
+  const avgConnectedDurationMs = connectedDurations.length ? connectedDurations.reduce((a, b) => a + b, 0) / connectedDurations.length : 0;
+  const medianConnectedDurationMs = median(connectedDurations);
+  const emailsSent = r.emails.filter(e => (e.hs_email_direction || '').toUpperCase() === 'EMAIL').length;
+  const emailsRecv = r.emails.length - emailsSent;
+  const meetingsBooked = r.meetings.length;
+  const meetingsCompleted = r.meetings.filter(m => (m.hs_meeting_outcome || '').toUpperCase() === 'COMPLETED').length;
+  const meetingCompletionRate = meetingsBooked ? Math.round((meetingsCompleted / meetingsBooked) * 100) : 0;
+  const newLeads = r.leads.length;
+  const enquiries = r.enquiries.length;
+  const notes = r.notes.length;
+  const speedToContact = computeSpeedToFirstContact(r);
+  return {
+    owner: r.owner, color: ownerColor(r.owner.id),
+    calls, connected, connectRate, avgConnectedDurationMs, medianConnectedDurationMs,
+    emailsSent, emailsRecv, meetingsBooked, meetingsCompleted, meetingCompletionRate,
+    newLeads, enquiries, notes, speedToContact
+  };
+}
+
+/* ---------- Rep filter ---------- */
+
+let activeOwnerIds = new Set(OWNERS.map(o => o.id));
+
+function renderRepFilterChips() {
+  const row = document.getElementById('repFilterRow');
+  row.innerHTML = '<span class="rep-filter-label">Reps:</span>';
+  OWNERS.forEach(owner => {
+    const chip = document.createElement('span');
+    chip.className = 'rep-chip' + (activeOwnerIds.has(owner.id) ? ' on' : '');
+    chip.style.setProperty('--dot-color', ownerColor(owner.id));
+    chip.style.color = activeOwnerIds.has(owner.id) ? ownerColor(owner.id) : '';
+    chip.dataset.ownerId = owner.id;
+    chip.innerHTML = `<span class="rep-dot"></span>${escapeHtml(owner.name)}`;
+    chip.addEventListener('click', () => {
+      if (activeOwnerIds.has(owner.id)) activeOwnerIds.delete(owner.id);
+      else activeOwnerIds.add(owner.id);
+      renderRepFilterChips();
+      renderAll();
+    });
+    row.appendChild(chip);
+  });
+  const actions = document.createElement('span');
+  actions.className = 'rep-filter-actions';
+  actions.innerHTML = '<button type="button" data-act="all">All</button><button type="button" data-act="none">None</button>';
+  actions.querySelector('[data-act="all"]').addEventListener('click', () => {
+    activeOwnerIds = new Set(OWNERS.map(o => o.id));
+    renderRepFilterChips();
+    renderAll();
+  });
+  actions.querySelector('[data-act="none"]').addEventListener('click', () => {
+    activeOwnerIds = new Set();
+    renderRepFilterChips();
+    renderAll();
+  });
+  row.appendChild(actions);
+}
+
+/* ---------- View mode: Team Overview vs. Sales Agent ----------
+   Team Overview = multi-rep comparison table, book health, trend chart.
+   Sales Agent = a dedicated single-agent drill-down (KPIs, engagement pies,
+   per-metric mini trends) for whichever one agent is picked below. */
+
+let viewMode = 'team';
+let selectedAgentId = OWNERS[0].id;
+
+function getActiveOwnerIds() {
+  return viewMode === 'agent' ? new Set([selectedAgentId]) : activeOwnerIds;
+}
+
+function renderViewTabs() {
+  document.querySelectorAll('.view-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-view') === viewMode);
+  });
+  document.getElementById('repFilterRow').classList.toggle('hidden', viewMode !== 'team');
+  document.getElementById('agentPickerRow').classList.toggle('hidden', viewMode !== 'agent');
+}
+
+function renderAgentPickerChips() {
+  const row = document.getElementById('agentPickerRow');
+  row.innerHTML = '<span class="rep-filter-label">Agent:</span>';
+  OWNERS.forEach(owner => {
+    const chip = document.createElement('span');
+    chip.className = 'rep-chip' + (selectedAgentId === owner.id ? ' on' : '');
+    chip.style.setProperty('--dot-color', ownerColor(owner.id));
+    chip.style.color = selectedAgentId === owner.id ? ownerColor(owner.id) : '';
+    chip.dataset.ownerId = owner.id;
+    chip.innerHTML = `<span class="rep-dot"></span>${escapeHtml(owner.name)}`;
+    chip.addEventListener('click', () => {
+      if (selectedAgentId === owner.id) return;
+      selectedAgentId = owner.id;
+      renderAgentPickerChips();
+      renderAll();
+    });
+    row.appendChild(chip);
+  });
+}
+
+/* ---------- Comparison table ---------- */
+
+function renderCompareTable(results, rangeConfig) {
+  document.getElementById('compareSub').textContent = `${rangeConfig.label} · as of ${new Date().toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+
+  const rows = results.map(computeRepStats);
+
+  const totals = rows.reduce((acc, r) => {
+    acc.calls += r.calls; acc.connected += r.connected; acc.emailsSent += r.emailsSent; acc.emailsRecv += r.emailsRecv;
+    acc.meetingsBooked += r.meetingsBooked; acc.newLeads += r.newLeads; acc.enquiries += r.enquiries; acc.notes += r.notes;
+    return acc;
+  }, { calls: 0, connected: 0, emailsSent: 0, emailsRecv: 0, meetingsBooked: 0, newLeads: 0, enquiries: 0, notes: 0 });
+  const totalConnectRate = totals.calls ? Math.round((totals.connected / totals.calls) * 100) : 0;
+
+  const rateBar = (p) => `<div class="rate-cell"><div class="rate-track"><div class="rate-fill${p < 40 ? ' low' : ''}" style="width:${p}%"></div></div>${p}%</div>`;
+
+  const bodyRows = rows.map(r => `
+    <tr>
+      <td><div class="rep-cell"><span class="rep-dot" style="background:${r.color}"></span>${escapeHtml(r.owner.name)}</div></td>
+      <td>${r.calls}</td>
+      <td>${r.connected}</td>
+      <td>${rateBar(r.connectRate)}</td>
+      <td>${formatDuration(r.avgConnectedDurationMs)}</td>
+      <td>${formatDuration(r.medianConnectedDurationMs)}</td>
+      <td>${r.emailsSent}</td>
+      <td>${r.emailsRecv}</td>
+      <td>${r.meetingsBooked}</td>
+      <td>${rateBar(r.meetingCompletionRate)}</td>
+      <td>${r.newLeads}</td>
+      <td>${r.enquiries}</td>
+      <td>${r.notes}</td>
+      <td>${formatHours(r.speedToContact.medianHours)}<span class="pct-inline">${r.speedToContact.totalLeads ? ` (${r.speedToContact.matched}/${r.speedToContact.totalLeads} matched)` : ''}</span></td>
+      <td>${r.speedToContact.contacted}/${r.speedToContact.totalLeads}<span class="pct-inline">${r.speedToContact.untouched ? ` (${r.speedToContact.untouched} untouched)` : ''}</span></td>
+    </tr>`).join('');
+
+  const totalRow = rows.length ? `
+    <tr class="total-row">
+      <td>Filtered Total</td>
+      <td>${totals.calls}</td>
+      <td>${totals.connected}</td>
+      <td>${rateBar(totalConnectRate)}</td>
+      <td>—</td>
+      <td>—</td>
+      <td>${totals.emailsSent}</td>
+      <td>${totals.emailsRecv}</td>
+      <td>${totals.meetingsBooked}</td>
+      <td>—</td>
+      <td>${totals.newLeads}</td>
+      <td>${totals.enquiries}</td>
+      <td>${totals.notes}</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>` : '';
+
+  document.getElementById('compareTable').innerHTML = `
+    <thead>
+      <tr>
+        <th>Rep</th><th>Calls</th><th>Connected</th><th>Connect Rate</th>
+        <th>Avg Talk Time</th><th>Median Talk Time</th>
+        <th>Emails Sent</th><th>Emails Recv'd</th><th>Meetings Booked</th>
+        <th>Meeting Completion</th><th>New Leads</th><th>Enquiries</th><th>Notes</th>
+        <th>Speed to 1st Contact (median)</th><th>New Leads Contacted</th>
+      </tr>
+    </thead>
+    <tbody>${bodyRows || '<tr><td colspan="15" style="color:#9ca3af;">No reps selected — choose at least one rep above.</td></tr>'}${totalRow}</tbody>`;
+
+  document.getElementById('caveatNote').textContent = rangeConfig.truncated
+    ? '⚠ This range has an extremely high volume of activity (10,000+ records for at least one type) — totals could be a slight undercount.'
+    : 'Talk Time is only computed from calls where a duration was logged by the dialer — reps whose dialer doesn\'t log duration will show "—". Speed to 1st Contact and New Leads Contacted are name-matched against this period\'s call log (no clean lead↔call ID join is exposed here) — treat as a close estimate, not exact.';
+}
+
+/* ---------- Activity Log (full raw log, scrollable) ---------- */
+
+const ACTIVITY_TYPE_COLORS = {
+  'Call': '#2563eb',
+  'Email': '#0d9488',
+  'Meeting': '#7c3aed',
+  'Note': '#6b7280',
+  'New Lead': '#d97706',
+  'Enquiry': '#dc2626'
+};
+
+const ACTIVITY_LOG_CAP = 500;
+
+function stripHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function buildActivityLog(filteredResults) {
+  const entries = [];
+  filteredResults.forEach(r => {
+    const color = ownerColor(r.owner.id);
+    const ownerName = r.owner.name;
+
+    r.calls.forEach(c => {
+      const disposition = CALL_DISPOSITIONS[c.hs_call_disposition] || 'Logged';
+      const dur = Number(c.hs_call_duration) || 0;
+      entries.push({
+        ts: Number(c.hs_timestamp), ownerName, color, type: 'Call',
+        detail: `${disposition}${dur > 0 ? ' · ' + formatDuration(dur) : ''}${c.hs_call_title ? ' — ' + c.hs_call_title : ''}`
+      });
+    });
+    r.emails.forEach(e => {
+      const dir = (e.hs_email_direction || '').toUpperCase() === 'EMAIL' ? 'Sent' : 'Received';
+      entries.push({
+        ts: Number(e.hs_timestamp), ownerName, color, type: 'Email',
+        detail: `${dir}${e.hs_email_subject ? ' — ' + e.hs_email_subject : ''}`
+      });
+    });
+    r.meetings.forEach(m => {
+      // Logged at hs_createdate (when it was booked), matching the period
+      // filter — the scheduled meeting time is shown in the detail text
+      // instead, since it can be days or weeks after the booking itself.
+      const scheduledFor = m.hs_timestamp ? new Date(Number(m.hs_timestamp)).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+      entries.push({
+        ts: Number(m.hs_createdate), ownerName, color, type: 'Meeting',
+        detail: `${m.hs_meeting_outcome || 'Booked'}${m.hs_meeting_title ? ' — ' + m.hs_meeting_title : ''}${scheduledFor ? ` (scheduled for ${scheduledFor})` : ''}`
+      });
+    });
+    r.notes.forEach(n => {
+      const body = stripHtml(n.hs_note_body);
+      entries.push({
+        ts: Number(n.hs_timestamp), ownerName, color, type: 'Note',
+        detail: body ? (body.length > 140 ? body.slice(0, 140) + '…' : body) : 'Note logged'
+      });
+    });
+    r.leads.forEach(l => {
+      const name = [l.firstname, l.lastname].filter(Boolean).join(' ');
+      entries.push({
+        ts: Number(l.createdate), ownerName, color, type: 'New Lead',
+        detail: `${name || 'New contact'} created${l.email ? ' — ' + l.email : ''}`
+      });
+    });
+    r.enquiries.forEach(en => {
+      entries.push({
+        ts: Number(en.hubspot_owner_assigneddate), ownerName, color, type: 'Enquiry',
+        detail: 'Contact owner assigned (new or reconverted)'
+      });
+    });
+  });
+
+  entries.sort((a, b) => b.ts - a.ts);
+  return entries;
+}
+
+function renderActivityLog(filteredResults, rangeConfig) {
+  const sub = document.getElementById('activityLogSub');
+  const body = document.getElementById('activityLogBody');
+  const note = document.getElementById('activityLogNote');
+
+  sub.textContent = `${rangeConfig.label} · ${filteredResults.length} rep${filteredResults.length === 1 ? '' : 's'} selected · most recent first`;
+
+  const entries = buildActivityLog(filteredResults);
+  const shown = entries.slice(0, ACTIVITY_LOG_CAP);
+
+  body.innerHTML = shown.length ? shown.map(e => {
+    const typeColor = ACTIVITY_TYPE_COLORS[e.type] || '#6b7280';
+    return `
+    <tr>
+      <td>${escapeHtml(new Date(e.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}</td>
+      <td><div class="rep-cell"><span class="rep-dot" style="background:${e.color}"></span>${escapeHtml(e.ownerName)}</div></td>
+      <td><span class="type-badge" style="background:${typeColor}1a;color:${typeColor};">${escapeHtml(e.type)}</span></td>
+      <td>${escapeHtml(e.detail)}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="4" style="color:#9ca3af;">No activity logged for this range/filter.</td></tr>';
+
+  note.textContent = entries.length > ACTIVITY_LOG_CAP
+    ? `Showing the most recent ${ACTIVITY_LOG_CAP} of ${entries.length} logged activities for "${rangeConfig.label}" — narrow the range or rep filter to see the rest.`
+    : `${entries.length} logged activities for "${rangeConfig.label}".`;
+}
+
+/* ---------- Hourly calls-today bar chart (Agent Focus → Trend) ----------
+   Kyle asked for a plain "calls made per hour, 9am-6pm, today" bar alongside
+   the existing 14-day trend lines. Fixed to today's calendar date and a fixed
+   9am-6pm window regardless of which range tab is active up top — same
+   pattern as the 14-day trend, which also ignores the range tabs. Reuses
+   todayCallsByOwner (already fetched for the separate "Today's Calls" panel)
+   instead of firing a second query for the same data. */
+function buildHourlyBucketsToday() {
+  const buckets = [];
+  const now = new Date();
+  for (let h = 9; h < 18; h++) {
+    const start = new Date(now); start.setHours(h, 0, 0, 0);
+    const end = new Date(now); end.setHours(h + 1, 0, 0, 0);
+    const label = h === 12 ? '12pm' : (h < 12 ? `${h}am` : `${h - 12}pm`);
+    buckets.push({ startMs: start.getTime(), endMs: end.getTime(), label });
+  }
+  return buckets;
+}
+
+/* ---------- Trend bucketing (still used by Agent Focus's per-metric mini-charts) ---------- */
+
+function buildBuckets(rangeConfig) {
+  if (rangeConfig.mode === 'intraday') {
+    const session = rangeConfig.sessions[0];
+    const end = rangeConfig.key === 'today' ? rangeConfig.nowMs : session.nextOpenMs;
+    const buckets = [];
+    let cur = session.openMs;
+    while (cur < end) {
+      const next = Math.min(cur + 60 * 60 * 1000, end);
+      buckets.push({ startMs: cur, endMs: next, label: new Date(cur).toLocaleTimeString(undefined, { hour: 'numeric' }) });
+      cur = next;
+    }
+    return buckets;
+  }
+  // Trend is the only caller of this branch right now, and it's meant to be
+  // business-days-only per Kyle's request — drop Saturday/Sunday sessions
+  // rather than showing empty weekend bars.
+  return rangeConfig.sessions
+    .filter(s => { const d = new Date(s.openMs).getDay(); return d !== 0 && d !== 6; })
+    .map(s => ({
+      startMs: s.openMs,
+      endMs: Math.min(s.nextOpenMs, rangeConfig.nowMs),
+      label: s.dateLabel
+    }));
+}
+
+/* Groups a daily-session rangeConfig's sessions into Monday-Sunday weekly
+   buckets, one dot per week (weekends included in each week's window, unlike
+   the daily trend above which drops them — dropping weekends only made sense
+   for a bar-per-weekday view; a weekly total should include everything that
+   happened that week). Label is the week's Monday date. Used by the weekly
+   "Calls Made" / "Meetings Booked" trend lines in Agent Focus. */
+function buildWeeklyBuckets(rangeConfig) {
+  const weeks = [];
+  let cur = null;
+  rangeConfig.sessions.forEach(s => {
+    const d = new Date(s.openMs);
+    const dow = d.getDay();
+    const diffToMonday = (dow === 0 ? -6 : 1 - dow);
+    const monday = new Date(d); monday.setDate(d.getDate() + diffToMonday); monday.setHours(0, 0, 0, 0);
+    const key = monday.getTime();
+    if (!cur || cur.key !== key) {
+      cur = {
+        key,
+        startMs: monday.getTime(),
+        endMs: Math.min(s.nextOpenMs, rangeConfig.nowMs),
+        label: monday.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      };
+      weeks.push(cur);
+    } else {
+      cur.endMs = Math.min(s.nextOpenMs, rangeConfig.nowMs);
+    }
+  });
+  return weeks;
+}
+
+/* ---------- Agent Focus view (single rep selected) ---------- */
+
+let miniChartInstances = [];
+
+function renderQualifiedGrid(ownerId) {
+  const grid = document.getElementById('qualifiedKpiGrid');
+  if (!qualifiedBreakdownCache[ownerId]) loadQualifiedBreakdown(ownerId);
+  const cached = qualifiedBreakdownCache[ownerId];
+
+  if (!cached) {
+    grid.innerHTML = '<div class="note">Loading meeting-qualification data… usually takes about 8–12s.</div>';
+    return;
+  }
+  if (cached.error) {
+    grid.innerHTML = `<div class="caveat">Could not load qualification data: ${escapeHtml(cached.error)}</div>`;
+    return;
+  }
+
+  const attendRate = pct(cached.meetingsAttended, cached.meetingsBooked);
+  const noShowRate = pct(cached.meetingsNoShow, cached.meetingsBooked);
+
+  const recon = RECONCILED_BOOKINGS[ownerId];
+  const bookedRecon = recon && recon.booked;
+  const hostedRecon = recon && recon.hosted;
+
+  // Label convention, fixed globally per Kyle's direction: the raw, live
+  // HubSpot query is always labeled "(HubSpot)" and the manually-reconciled
+  // number (where one exists) is always labeled "(Actual)", with the as-of
+  // date moved into the small sub-text under the number rather than the
+  // label itself — same two labels for every rep, Booked or Hosted, so it's
+  // never ambiguous which number is which or why they might differ. A rep
+  // can have BOTH a Booked and a Hosted reconciliation at once (Tim Gamin is
+  // the first: he's primarily a booker, but also picks up ghost-hosted
+  // meetings) — each side is independent, checked via recon.booked /
+  // recon.hosted rather than a single method/metric flag.
+
+  // Spreadsheet method (Sam, Amy) stores its confirmed total as reconciledCount
+  // + misattributed (found under a different creator ID) + recoveredViaEmail
+  // (Meeting record gone, but confirmed real via the email trail) +
+  // extraUnlogged (a real Meeting exists in HubSpot that never made it into
+  // the rep's personal log at all — confirmed on Amy specifically) — true
+  // gaps (zero trace anywhere) are deliberately excluded from the headline
+  // number, same treatment as the "total" method below, and called out in
+  // the sub-text instead.
+  const bookedReconCard = bookedRecon
+    ? (bookedRecon.method === 'spreadsheet'
+        ? { label: 'Meetings Booked (Actual)', value: bookedRecon.reconciledCount + (bookedRecon.misattributed || 0) + (bookedRecon.recoveredViaEmail || 0) + (bookedRecon.extraUnlogged || 0), sub: `of ${bookedRecon.spreadsheetTotal} in their personal log · ${bookedRecon.trueGaps} true gaps · updated ${bookedRecon.asOf}` }
+        : { label: 'Meetings Booked (Actual)', value: bookedRecon.reconciledTotal, sub: `updated ${bookedRecon.asOf}` })
+    : null;
+
+  const bookedCards = [
+    { label: 'Meetings Booked (HubSpot)', value: cached.meetingsBooked },
+    { label: 'Attended', value: cached.meetingsAttended, sub: `${attendRate}% attendance rate` },
+    { label: 'No Show', value: cached.meetingsNoShow, sub: `${noShowRate}% no-show rate` }
+  ];
+  if (bookedReconCard) bookedCards.splice(1, 0, bookedReconCard);
+
+  const cardHtml = c => `
+    <div class="kpi-card">
+      <div class="kpi-label">${escapeHtml(c.label)}</div>
+      <div class="kpi-value">${c.value}</div>
+      ${c.sub ? `<div class="kpi-sub">${escapeHtml(c.sub)}</div>` : ''}
+    </div>`;
+
+  // A rep can have a note on either side (or both) — render one caveat block
+  // per side that actually has a reconciliation, rather than one combined note.
+  const reconNotes = [bookedRecon, hostedRecon]
+    .filter(Boolean)
+    .map(r => `<div class="caveat" style="grid-column:1/-1;">📋 Last checked ${r.asOf}: ${escapeHtml(r.note)} This is a manual, point-in-time check (not live) — ask Claude to re-run it if it's been a while or new bookings have come in since.</div>`)
+    .join('');
+
+  if (cached.isSetterOnly) {
+    // Confirmed with the team: this rep is a pure setter and never hosts —
+    // showing a hubspot_owner_id-based "Hosted" number here would be wrong,
+    // since HubSpot leaves the owner on the setter even when someone else
+    // (Liam, Tom, Diarnah, Mark...) actually runs the meeting.
+    grid.innerHTML = bookedCards.map(cardHtml).join('')
+      + `<div class="caveat" style="grid-column:1/-1;">This rep is a setter — they book meetings for other reps to host, and don't run appointments themselves, so there's no "Hosted" number here.</div>`
+      + reconNotes;
+    return;
+  }
+
+  const hostedReconCard = hostedRecon
+    ? { label: 'Meetings Hosted (Actual)', value: hostedRecon.reconciledTotal, sub: `updated ${hostedRecon.asOf}` }
+    : null;
+
+  const hostedAttendRate = pct(cached.meetingsHostedCompleted, cached.meetingsHosted);
+  const hostedNoShowRate = pct(cached.meetingsHostedNoShow, cached.meetingsHosted);
+  const hostedCards = [
+    { label: 'Meetings Hosted (HubSpot)', value: cached.meetingsHosted },
+    { label: 'Completed', value: cached.meetingsHostedCompleted, sub: `${hostedAttendRate}% attendance rate` },
+    { label: 'No Show', value: cached.meetingsHostedNoShow, sub: `${hostedNoShowRate}% no-show rate` }
+  ];
+  if (hostedReconCard) hostedCards.splice(1, 0, hostedReconCard);
+
+  grid.innerHTML = bookedCards.map(cardHtml).join('')
+    + `<div style="grid-column:1/-1;height:1px;"></div>`
+    + hostedCards.map(cardHtml).join('')
+    + `<div class="caveat" style="grid-column:1/-1;">"Booked" (hs_created_by_user_id) = meetings this rep personally created. "Hosted" (hubspot_owner_id) = meetings assigned to this rep, whoever created them. On this team these are often different people — pure setters (Amy, Samuele) book on closers' behalf. Two separate things can make Booked look wrong for a rep, and they need different fixes: (1) HubSpot doesn't always reassign the owner when a setter books for a closer, so a rep's true Hosted total can be a real undercount — confirmed on Lara, Tim, and Liam, whose real meetings booked by Sam/Amy/others never show up in their Hosted number because those reps created the records. (2) Separately, HubSpot's "owner" ID and "login/creator" ID are two different ID systems that don't always match for the same person — confirmed on Thomas Murray (real login ID 64248901, not his owner ID) and Diarnah Lynch (50258835): both were showing 0 Booked for their entire history because every query checked the wrong ID. Fixed by aliasing both IDs together for these two reps specifically (see REP_CREATOR_ALIASES in the code) — their Booked numbers are now real. Mark Meyer's meetings mostly have no creator recorded at all ("Unassigned"), which is a genuine data gap with no ID to alias. Both figures are all-time, unbounded by the range tabs above.</div>`
+    + reconNotes;
+}
+
+/* Meetings this rep booked in the selected period, as an actual log (not just
+   a count) — reuses repResult.meetings, which loadAll() already fetched and
+   date-filtered by hs_createdate (when the booking action happened) for this
+   range/owner via the creator filter, so this needs no extra HubSpot call.
+   "Booked On" is hs_createdate — the period this log and the count above are
+   both scoped to. "Meeting Date" is the separate hs_meeting_start_time/
+   hs_timestamp — when the meeting is actually scheduled to happen, which can
+   be well before or after the period (a meeting created today for next
+   month still shows up here, dated for next month). */
+function renderPeriodMeetingsLog(repResult, rangeConfig) {
+  const kpiGrid = document.getElementById('periodMeetingsKpiGrid');
+  const sub = document.getElementById('periodMeetingsSub');
+  const body = document.getElementById('periodMeetingsBody');
+
+  const meetings = (repResult.meetings || []).slice().sort((a, b) => Number(b.hs_createdate) - Number(a.hs_createdate));
+  const completed = meetings.filter(m => (m.hs_meeting_outcome || '').toUpperCase() === 'COMPLETED').length;
+  const canceled = meetings.filter(m => (m.hs_meeting_outcome || '').toUpperCase() === 'CANCELED').length;
+  const noShow = meetings.filter(m => (m.hs_meeting_outcome || '').toUpperCase() === 'NO_SHOW').length;
+
+  kpiGrid.innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-label">Meetings Booked</div>
+      <div class="kpi-value">${meetings.length}</div>
+      <div class="kpi-sub">${escapeHtml(rangeConfig.label)}, by booking date</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Completed</div>
+      <div class="kpi-value">${completed}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">No Show</div>
+      <div class="kpi-value">${noShow}</div>
+      <div class="kpi-sub">of meetings booked this period — see Lifetime below for all-time</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Canceled</div>
+      <div class="kpi-value">${canceled}</div>
+    </div>`;
+
+  sub.textContent = `Activity log — ${meetings.length} meeting${meetings.length === 1 ? '' : 's'} booked by ${repResult.owner.name} for "${rangeConfig.label}"`;
+
+  const fmt = ts => escapeHtml(new Date(Number(ts)).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }));
+
+  body.innerHTML = meetings.length ? meetings.map(m => `
+    <tr>
+      <td>${fmt(m.hs_createdate)}</td>
+      <td>${m.hs_timestamp ? fmt(m.hs_timestamp) : '—'}</td>
+      <td>${escapeHtml(m.hs_meeting_title || '(untitled meeting)')}</td>
+      <td>${escapeHtml(m.hs_meeting_outcome || 'Scheduled')}</td>
+    </tr>`).join('') : '<tr><td colspan="4" style="color:#9ca3af;">No meetings booked by this rep in this period.</td></tr>';
+}
+
+function renderFocusView(repResult, rangeConfig) {
+  const stats = computeRepStats(repResult);
+
+  document.getElementById('focusSub').textContent = `${rangeConfig.label} · as of ${new Date().toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  document.getElementById('focusDot').style.background = stats.color;
+  document.getElementById('focusName').textContent = stats.owner.name;
+
+  const periodCards = [
+    { label: 'Calls Made', value: stats.calls },
+    { label: 'Calls Connected', value: stats.connected, sub: `${stats.connectRate}% connect rate` },
+    { label: 'Avg Talk Time', value: formatDuration(stats.avgConnectedDurationMs) },
+    { label: 'Median Talk Time', value: formatDuration(stats.medianConnectedDurationMs) },
+    { label: 'Emails Sent', value: stats.emailsSent },
+    { label: 'Emails Received', value: stats.emailsRecv },
+    { label: 'Meetings Booked', value: stats.meetingsBooked },
+    { label: 'Meetings Completed', value: stats.meetingsCompleted, sub: `${stats.meetingCompletionRate}% completion rate` },
+    { label: 'New Leads', value: stats.newLeads },
+    { label: 'Enquiries', value: stats.enquiries, sub: 'new + reconverted' },
+    { label: 'Notes Logged', value: stats.notes },
+    { label: 'Speed to 1st Contact (median)', value: formatHours(stats.speedToContact.medianHours), sub: `avg ${formatHours(stats.speedToContact.avgHours)} · ${stats.speedToContact.matched}/${stats.speedToContact.totalLeads} leads matched` },
+    { label: 'New Leads Contacted', value: `${stats.speedToContact.contacted}/${stats.speedToContact.totalLeads}`, sub: stats.speedToContact.untouched ? `${stats.speedToContact.untouched} never touched` : 'all touched' }
+  ];
+
+  document.getElementById('kpiGrid').innerHTML = periodCards.map(c => `
+    <div class="kpi-card">
+      <div class="kpi-label">${escapeHtml(c.label)}</div>
+      <div class="kpi-value">${c.value}</div>
+      ${c.sub ? `<div class="kpi-sub">${escapeHtml(c.sub)}</div>` : ''}
+    </div>`).join('');
+
+  renderPeriodMeetingsLog(repResult, rangeConfig);
+  renderQualifiedGrid(repResult.owner.id);
+  renderBookHealthGrid(repResult.owner.id);
+
+  document.getElementById('focusCaveatNote').textContent = rangeConfig.truncated
+    ? '⚠ This range has an extremely high volume of activity (10,000+ records for at least one type) — totals could be a slight undercount.'
+    : 'Talk Time only reflects calls where the dialer logged a duration. Speed to 1st Contact and New Leads Contacted are name-matched, not ID-matched — a close estimate.';
+
+  // Trend always shows the last 14 calendar days (daily) plus the last 12
+  // weeks (weekly, Calls Made / Meetings Booked only), regardless of
+  // whichever range tab is selected up top for the KPI cards above — both
+  // fetched separately via loadTrendData() / loadWeeklyTrendData() so
+  // switching to "Today" doesn't collapse either into a single-point
+  // non-trend. Uses their own repResults (trendResults / weeklyTrendResults)
+  // scoped to their own rangeConfigs, not the one passed into this function.
+  const trendGrid = document.getElementById('miniChartsGrid');
+  if (trendLoading && !trendResults) {
+    trendGrid.innerHTML = '<div class="note">Loading 14-day trend…</div>';
+  } else if (trendError) {
+    trendGrid.innerHTML = `<div class="caveat">Could not load trend: ${escapeHtml(trendError)}</div>`;
+  } else if (trendResults && trendRangeConfig) {
+    const trendRepResult = trendResults.find(r => r.owner.id === repResult.owner.id);
+    const buckets = buildBuckets(trendRangeConfig);
+
+    let weeklyCardsHtml = '';
+    if (weeklyTrendLoading && !weeklyTrendResults) {
+      weeklyCardsHtml = '<div class="mini-chart-card"><div class="mini-chart-title">Weekly Trend</div><div class="note">Loading 12-week trend…</div></div>';
+    } else if (weeklyTrendError) {
+      weeklyCardsHtml = `<div class="mini-chart-card"><div class="mini-chart-title">Weekly Trend</div><div class="caveat">Could not load: ${escapeHtml(weeklyTrendError)}</div></div>`;
+    } else if (weeklyTrendResults && weeklyTrendRangeConfig) {
+      weeklyCardsHtml = WEEKLY_METRICS.map(m => `
+      <div class="mini-chart-card">
+        <div class="mini-chart-title">${escapeHtml(m.label)} (Weekly)</div>
+        <div class="mini-chart-wrap"><canvas id="mini-weekly-${m.key}"></canvas></div>
+      </div>`).join('');
+    }
+
+    trendGrid.innerHTML = `
+      <div class="mini-chart-card">
+        <div class="mini-chart-title">Calls by Hour (Today, 9am-6pm)</div>
+        <div class="mini-chart-wrap"><canvas id="mini-hourlyCalls"></canvas></div>
+      </div>`
+      + METRICS.map(m => `
+      <div class="mini-chart-card">
+        <div class="mini-chart-title">${escapeHtml(m.label)}</div>
+        <div class="mini-chart-wrap"><canvas id="mini-${m.key}"></canvas></div>
+      </div>`).join('')
+      + weeklyCardsHtml;
+
+    miniChartInstances.forEach(ch => ch.destroy());
+    miniChartInstances = [];
+
+    // Hourly calls-today bar — independent of the 14-day trend lines below,
+    // sourced from todayCallsByOwner (already fetched for the "Today's Calls"
+    // panel) rather than a second query.
+    {
+      const hourlyBuckets = buildHourlyBucketsToday();
+      const todayCalls = (todayCallsByOwner && todayCallsByOwner[repResult.owner.id] && todayCallsByOwner[repResult.owner.id].calls) || [];
+      const hourlyData = hourlyBuckets.map(b => todayCalls.filter(c => {
+        const t = Number(c.hs_timestamp);
+        return t >= b.startMs && t < b.endMs;
+      }).length);
+      const ctx = document.getElementById('mini-hourlyCalls').getContext('2d');
+      const chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: hourlyBuckets.map(b => b.label),
+          datasets: [{
+            data: hourlyData,
+            backgroundColor: stats.color,
+            borderRadius: 3,
+            maxBarThickness: 28
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 400 },
+          scales: {
+            x: { ticks: { color: '#9ca3af', font: { size: 10 } }, grid: { display: false } },
+            y: { beginAtZero: true, ticks: { color: '#9ca3af', precision: 0, font: { size: 10 } }, grid: { color: '#f1f5f9' } }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: item => `${item.parsed.y} calls` } }
+          }
+        }
+      });
+      miniChartInstances.push(chart);
+    }
+
+    METRICS.forEach(m => {
+      const ctx = document.getElementById(`mini-${m.key}`).getContext('2d');
+      const data = buckets.map(b => m.count(trendRepResult, b.startMs, b.endMs));
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: buckets.map(b => b.label),
+        datasets: [{
+          data,
+          borderColor: stats.color,
+          backgroundColor: stats.color,
+          borderWidth: 2,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          tension: 0.25,
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 400 },
+        interaction: { mode: 'nearest', intersect: false },
+        scales: {
+          x: { ticks: { color: '#9ca3af', maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: '#9ca3af', precision: 0, font: { size: 10 } }, grid: { color: '#f1f5f9' } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: item => `${item.parsed.y} ${m.label.toLowerCase()}` } }
+        }
+      }
+    });
+      miniChartInstances.push(chart);
+    });
+
+    // Weekly Calls Made / Meetings Booked — one dot per Monday-Sunday week,
+    // last 12 weeks, sourced from weeklyTrendResults (separate fetch, see
+    // loadWeeklyTrendData above) rather than the 14-day trendResults used
+    // just above, which doesn't span far enough back.
+    if (weeklyTrendResults && weeklyTrendRangeConfig) {
+      const weeklyBuckets = buildWeeklyBuckets(weeklyTrendRangeConfig);
+      const weeklyRepResult = weeklyTrendResults.find(r => r.owner.id === repResult.owner.id);
+      WEEKLY_METRICS.forEach(m => {
+        const el = document.getElementById(`mini-weekly-${m.key}`);
+        if (!el) return;
+        const ctx = el.getContext('2d');
+        const data = weeklyBuckets.map(b => m.count(weeklyRepResult, b.startMs, b.endMs));
+        const chart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: weeklyBuckets.map(b => b.label),
+            datasets: [{
+              data,
+              borderColor: stats.color,
+              backgroundColor: stats.color,
+              borderWidth: 2,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              tension: 0.25,
+              fill: false
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 400 },
+            interaction: { mode: 'nearest', intersect: false },
+            scales: {
+              x: { ticks: { color: '#9ca3af', maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
+              y: { beginAtZero: true, ticks: { color: '#9ca3af', precision: 0, font: { size: 10 } }, grid: { color: '#f1f5f9' } }
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: item => `${item.parsed.y} ${m.label.toLowerCase()}`,
+                  title: items => `Week of ${items[0].label}`
+                }
+              }
+            }
+          }
+        });
+        miniChartInstances.push(chart);
+      });
+    }
+  } else {
+    trendGrid.innerHTML = '<div class="note">Loading 14-day trend…</div>';
+  }
+}
+
+/* ---------- Main ---------- */
+
+let currentRangeKey = 'today';
+let lastResults = null;
+let lastRangeConfig = null;
+
+function renderAll() {
+  renderTodayCallsTable();
+
+  if (!lastResults || !lastRangeConfig) return;
+
+  const currentIds = getActiveOwnerIds();
+  const filtered = lastResults.filter(r => currentIds.has(r.owner.id));
+  renderActivityLog(filtered, lastRangeConfig);
+
+  const comparePanel = document.getElementById('comparePanel');
+  const focusPanel = document.getElementById('focusPanel');
+
+  if (viewMode === 'agent') {
+    comparePanel.classList.add('hidden');
+    focusPanel.classList.remove('hidden');
+    const agentResult = filtered[0] || lastResults.find(r => r.owner.id === selectedAgentId);
+    if (agentResult) renderFocusView(agentResult, lastRangeConfig);
+  } else {
+    focusPanel.classList.add('hidden');
+    comparePanel.classList.remove('hidden');
+    renderCompareTable(filtered, lastRangeConfig);
+  }
+}
+
+async function loadAndRender(rangeKey) {
+  currentRangeKey = rangeKey;
+  document.querySelectorAll('.range-tab').forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-range') === rangeKey));
+
+  const statusEl = document.getElementById('status');
+  const loadingBar = document.getElementById('loadingBar');
+  statusEl.classList.remove('error');
+
+  // Closed ranges (Yesterday/Last Week/Last Month) may resolve instantly from
+  // local cache with no HubSpot queries at all — only show the loading bar
+  // and countdown once we know we're actually about to fetch.
+  const rangeConfigPreview = getRangeConfig(rangeKey);
+  const cacheHit = readRangeCache(rangeConfigPreview);
+  let countdownId = null;
+  if (!cacheHit) {
+    loadingBar.classList.add('active');
+    // 7 base datasets (Calls/Emails/Meetings/Notes/Leads/Deals/Enquiries), each
+    // possibly multi-page for wide ranges — 7 is a floor, so the countdown can
+    // read "0s remaining" and keep going a bit on a big month-long pull; that's
+    // called out explicitly once the timer hits zero rather than looking stuck.
+    countdownId = startCountdown(statusEl, 7, 'Fetching HubSpot activity');
+  }
+
+  try {
+    const rangeConfig = rangeConfigPreview;
+    const { results, truncated, fromCache, cachedAt } = await loadAll(rangeConfig);
+    rangeConfig.truncated = truncated;
+
+    lastResults = results;
+    lastRangeConfig = rangeConfig;
+
+    renderAll();
+
+    const totalActivities = results.reduce((sum, r) => sum + r.calls.length + r.emails.length + r.meetings.length + r.notes.length, 0);
+    if (countdownId) stopCountdown(countdownId);
+    statusEl.textContent = fromCache
+      ? `Loaded ${totalActivities} logged activities across ${results.length} reps for "${rangeConfig.label}" from local cache (saved ${new Date(cachedAt).toLocaleString()}) — no HubSpot queries used, this period is finished and won't change.`
+      : `Loaded ${totalActivities} logged activities across ${results.length} reps for "${rangeConfig.label}" as of ${new Date().toLocaleTimeString()}.`;
+  } catch (err) {
+    stopCountdown(countdownId);
+    if (isNotShownError(err)) {
+      pendingRetryOnVisible.main = true;
+      statusEl.textContent = 'Paused — this happens when the artifact tab loses focus mid-load. It will resume automatically once this tab is visible again.';
+    } else {
+      statusEl.textContent = 'Could not load HubSpot data: ' + (err && err.message ? err.message : String(err));
+      statusEl.classList.add('error');
+    }
+  } finally {
+    stopCountdown(countdownId);
+    loadingBar.classList.remove('active');
+  }
+}
+
+document.getElementById('rangeTabs').addEventListener('click', ev => {
+  const btn = ev.target.closest('.range-tab');
+  if (!btn) return;
+  const key = btn.getAttribute('data-range');
+  // Always refetch, even if this tab is already active — it's the only way to
+  // manually refresh Team Comparison/Agent Focus/Trend data (Book Health and
+  // Today's Calls have their own explicit refresh links; this gives the main
+  // activity data the same).
+  loadAndRender(key);
+});
+
+document.getElementById('todayCallsRefreshBtn').addEventListener('click', () => { loadTodayCalls(); });
+
+document.getElementById('viewTabs').addEventListener('click', ev => {
+  const btn = ev.target.closest('.view-tab');
+  if (!btn) return;
+  const mode = btn.getAttribute('data-view');
+  if (mode === viewMode) return;
+  viewMode = mode;
+  renderViewTabs();
+  renderAll();
+});
+
+renderViewTabs();
+renderRepFilterChips();
+renderAgentPickerChips();
+loadAndRender('today');
+loadTodayCalls();
+loadTrendData();
+loadWeeklyTrendData();
+</script>
+</body>
+</html>
