@@ -267,25 +267,6 @@
     <div class="caveat" id="caveatNote"></div>
   </div>
 
-  <div class="panel" id="todayCallsPanel">
-    <div class="panel-title-row">
-      <div class="panel-title">Today's Calls (always "today," regardless of the range tab above)</div>
-      <button type="button" class="refresh-link" id="todayCallsRefreshBtn">⟳ Refresh</button>
-    </div>
-    <div style="overflow-x:auto;">
-      <table class="compare" id="todayCallsTable">
-        <thead>
-          <tr>
-            <th>Rep</th><th>Calls</th><th>Connected</th><th>Connect Rate</th>
-            <th>Avg Talk Time</th><th>Median Talk Time</th><th>Total Talk Time</th>
-          </tr>
-        </thead>
-        <tbody id="todayCallsBody"></tbody>
-      </table>
-    </div>
-    <div class="note" id="todayCallsNote"></div>
-  </div>
-
   <div class="panel" id="activityLogPanel">
     <div class="panel-title-row"><div class="panel-title">Activity Log</div></div>
     <div class="rep-filter-row" id="activityTypeFilterRow" style="margin-bottom:10px;"></div>
@@ -401,11 +382,10 @@ function isNotShownError(err) {
   return /not currently shown/i.test(msg);
 }
 
-const pendingRetryOnVisible = { main: false, todayCalls: false, trend: false, weeklyTrend: false };
+const pendingRetryOnVisible = { main: false, trend: false, weeklyTrend: false };
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
-  if (pendingRetryOnVisible.todayCalls) { pendingRetryOnVisible.todayCalls = false; loadTodayCalls(); }
   if (pendingRetryOnVisible.trend) { pendingRetryOnVisible.trend = false; loadTrendData(); }
   if (pendingRetryOnVisible.weeklyTrend) { pendingRetryOnVisible.weeklyTrend = false; loadWeeklyTrendData(); }
   if (pendingRetryOnVisible.main) { pendingRetryOnVisible.main = false; loadAndRender(currentRangeKey); }
@@ -1150,22 +1130,12 @@ async function loadAll(rangeConfig, forceRefresh) {
   return { results, truncated };
 }
 
-/* ---------- Today's Calls (always "today," independent of the range tabs) ----------
-   Answers "how many calls today, and how long were the connected ones" per
-   agent, without requiring the user to switch the range tabs to Today. */
-
-let todayCallsByOwner = null;
-let todayCallsLoading = false;
-let todayCallsError = null;
-
 /* ---------- Trend data (always "past 14 days," independent of the range
    tabs) ----------
    The mini-charts in Agent Focus used to bucket whatever range tab was
    selected up top (so picking "Today" gave a single-point "trend"). That's
    not a trend, that's a snapshot. Fixed to always show the last 14 calendar
-   days, fetched separately from the main range-tab data — same pattern as
-   loadTodayCalls() above, just reusing loadAll() with a pinned 'last14'
-   rangeConfig instead of writing a second bespoke fetch. */
+   days, fetched separately from the main range-tab data. */
 
 let trendResults = null;
 let trendRangeConfig = null;
@@ -1233,62 +1203,9 @@ async function loadWeeklyTrendData() {
   }
 }
 
-async function loadTodayCalls() {
-  todayCallsLoading = true;
-  todayCallsError = null;
-  renderAll();
-
-  try {
-    const rangeConfig = getRangeConfig('today');
-    const range = paddedSqlRange(rangeConfig);
-    const ownerIds = OWNERS.map(o => `'${o.id}'`).join(',');
-    const ownerFilter = `hubspot_owner_id IN (${ownerIds})`;
-
-    const { rows: rawCalls } = await runQueryAllPages(
-      `SELECT hs_object_id, hubspot_owner_id, hs_call_disposition, hs_call_duration, hs_timestamp FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`
-    );
-    const calls = rawCalls.filter(r => inAnySession(Number(r.hs_timestamp), rangeConfig));
-    const callsByOwner = groupByOwner(calls);
-
-    const byOwner = {};
-    OWNERS.forEach(o => {
-      const ownerCalls = callsByOwner[o.id] || [];
-      const total = ownerCalls.length;
-      const connectedCalls = ownerCalls.filter(c => CALL_DISPOSITIONS[c.hs_call_disposition] === 'Connected');
-      const connected = connectedCalls.length;
-      const connectRate = total ? Math.round((connected / total) * 100) : 0;
-      const durations = connectedCalls.map(c => Number(c.hs_call_duration) || 0).filter(d => d > 0);
-      const totalDurationMs = durations.reduce((a, b) => a + b, 0);
-      byOwner[o.id] = {
-        total, connected, connectRate,
-        avgDurationMs: durations.length ? totalDurationMs / durations.length : 0,
-        medianDurationMs: median(durations),
-        totalDurationMs,
-        // Raw calls kept (not just the aggregate stats above) so the Agent
-        // Focus "Calls by Hour Today" bar chart can bucket them by hour
-        // without a second fetch — this function already pulls every one of
-        // today's calls, no reason to fetch them twice.
-        calls: ownerCalls
-      };
-    });
-
-    todayCallsByOwner = byOwner;
-  } catch (err) {
-    if (isNotShownError(err)) {
-      pendingRetryOnVisible.todayCalls = true;
-      todayCallsError = 'Paused — this happens when the artifact tab loses focus mid-load. It will resume automatically once this tab is visible again.';
-    } else {
-      todayCallsError = err && err.message ? err.message : String(err);
-    }
-  } finally {
-    todayCallsLoading = false;
-    renderAll();
-  }
-}
-
 /* ---------- Contact links for the currently selected range ----------
    Fetched separately from the main loadAll() range fetch (same "load
-   independently, re-render when ready" pattern as Today's Calls/Trend above)
+   independently, re-render when ready" pattern as Trend above)
    since it's 4 extra cross-object queries that only the Activity Log needs —
    no reason to slow down loadTrendData()/loadWeeklyTrendData(), which never
    render the log. Best-effort: New Lead and Enquiry rows already carry their
@@ -1346,95 +1263,6 @@ function formatDurationLong(ms) {
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
-function computeCallStatsFromCalls(calls) {
-  const total = calls.length;
-  const connectedCalls = calls.filter(c => CALL_DISPOSITIONS[c.hs_call_disposition] === 'Connected');
-  const connected = connectedCalls.length;
-  const connectRate = total ? Math.round((connected / total) * 100) : 0;
-  const durations = connectedCalls.map(c => Number(c.hs_call_duration) || 0).filter(d => d > 0);
-  const totalDurationMs = durations.reduce((a, b) => a + b, 0);
-  return {
-    total, connected, connectRate,
-    avgDurationMs: durations.length ? totalDurationMs / durations.length : 0,
-    medianDurationMs: median(durations),
-    totalDurationMs
-  };
-}
-
-function renderTodayCallsTable() {
-  const body = document.getElementById('todayCallsBody');
-  const note = document.getElementById('todayCallsNote');
-
-  // When the range tab is already on "Today," reuse Team Comparison's own
-  // fetched calls directly instead of relying on this panel's separate fetch.
-  // Two independent queries for the same thing can drift apart the moment
-  // either one gets refreshed (or enough real time passes) while the other
-  // doesn't — sharing the data makes that impossible while "Today" is active.
-  const useShared = currentRangeKey === 'today' && !!lastResults;
-
-  if (!useShared) {
-    if (todayCallsLoading && !todayCallsByOwner) {
-      body.innerHTML = '<tr><td colspan="7" style="color:#9ca3af;">Loading today\'s calls…</td></tr>';
-      note.textContent = '';
-      return;
-    }
-    if (todayCallsError) {
-      body.innerHTML = `<tr><td colspan="7" style="color:#b91c1c;">Could not load today's calls: ${escapeHtml(todayCallsError)}</td></tr>`;
-      note.textContent = '';
-      return;
-    }
-    if (!todayCallsByOwner) { body.innerHTML = ''; note.textContent = ''; return; }
-  }
-
-  const byOwner = {};
-  if (useShared) {
-    lastResults.forEach(r => { byOwner[r.owner.id] = computeCallStatsFromCalls(r.calls); });
-  } else {
-    OWNERS.forEach(o => { byOwner[o.id] = todayCallsByOwner[o.id]; });
-  }
-
-  const currentIds = getActiveOwnerIds();
-  const rows = OWNERS.filter(o => currentIds.has(o.id)).map(o => ({ owner: o, color: ownerColor(o.id), ...byOwner[o.id] }));
-
-  const rateBar = (p) => `<div class="rate-cell"><div class="rate-track"><div class="rate-fill${p < 40 ? ' low' : ''}" style="width:${p}%"></div></div>${p}%</div>`;
-
-  const totals = rows.reduce((acc, r) => {
-    acc.total += r.total; acc.connected += r.connected; acc.totalDurationMs += r.totalDurationMs;
-    return acc;
-  }, { total: 0, connected: 0, totalDurationMs: 0 });
-  const totalConnectRate = totals.total ? Math.round((totals.connected / totals.total) * 100) : 0;
-
-  const bodyRows = rows.map(r => `
-    <tr>
-      <td><div class="rep-cell"><span class="rep-dot" style="background:${r.color}"></span>${escapeHtml(r.owner.name)}</div></td>
-      <td>${r.total}</td>
-      <td>${r.connected}</td>
-      <td>${rateBar(r.connectRate)}</td>
-      <td>${formatDuration(r.avgDurationMs)}</td>
-      <td>${formatDuration(r.medianDurationMs)}</td>
-      <td>${formatDurationLong(r.totalDurationMs)}</td>
-    </tr>`).join('');
-
-  const totalRow = rows.length ? `
-    <tr class="total-row">
-      <td>Filtered Total</td>
-      <td>${totals.total}</td>
-      <td>${totals.connected}</td>
-      <td>${rateBar(totalConnectRate)}</td>
-      <td>—</td>
-      <td>—</td>
-      <td>${formatDurationLong(totals.totalDurationMs)}</td>
-    </tr>` : '';
-
-  body.innerHTML = (bodyRows || '<tr><td colspan="7" style="color:#9ca3af;">No reps selected.</td></tr>') + totalRow;
-  const asOf = `as of ${new Date().toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
-  note.textContent = useShared
-    ? `Sharing Team Comparison's "Today" data (guaranteed to match) — ${asOf}. Talk Time only reflects calls where the dialer logged a duration.`
-    : (todayCallsLoading
-      ? 'Refreshing…'
-      : `Independently fetched (the range tab above isn't on Today) — ${asOf}. Talk Time only reflects calls where the dialer logged a duration. Click Refresh for the latest.`);
 }
 
 /* "Meetings Booked/Attended (Lifetime)" — lazy-loaded per agent (only when
@@ -1841,7 +1669,8 @@ function computeRepStats(r) {
   const connected = connectedCalls.length;
   const connectRate = calls ? Math.round((connected / calls) * 100) : 0;
   const connectedDurations = connectedCalls.map(c => Number(c.hs_call_duration) || 0).filter(d => d > 0);
-  const avgConnectedDurationMs = connectedDurations.length ? connectedDurations.reduce((a, b) => a + b, 0) / connectedDurations.length : 0;
+  const totalConnectedDurationMs = connectedDurations.reduce((a, b) => a + b, 0);
+  const avgConnectedDurationMs = connectedDurations.length ? totalConnectedDurationMs / connectedDurations.length : 0;
   const medianConnectedDurationMs = median(connectedDurations);
   const emailsSent = r.emails.filter(e => (e.hs_email_direction || '').toUpperCase() === 'EMAIL').length;
   const emailsRecv = r.emails.length - emailsSent;
@@ -1854,7 +1683,7 @@ function computeRepStats(r) {
   const speedToContact = computeSpeedToFirstContact(r);
   return {
     owner: r.owner, color: ownerColor(r.owner.id),
-    calls, connected, connectRate, avgConnectedDurationMs, medianConnectedDurationMs,
+    calls, connected, connectRate, avgConnectedDurationMs, medianConnectedDurationMs, totalConnectedDurationMs,
     emailsSent, emailsRecv, meetingsBooked, meetingsCompleted, meetingCompletionRate,
     newLeads, enquiries, notes, speedToContact
   };
@@ -2450,6 +2279,7 @@ function renderFocusView(repResult, rangeConfig) {
     { label: 'Calls Connected', value: stats.connected, sub: `${stats.connectRate}% connect rate` },
     { label: 'Avg Talk Time', value: formatDuration(stats.avgConnectedDurationMs) },
     { label: 'Median Talk Time', value: formatDuration(stats.medianConnectedDurationMs) },
+    { label: 'Total Talk Time', value: formatDurationLong(stats.totalConnectedDurationMs) },
     { label: 'Emails Sent', value: stats.emailsSent },
     { label: 'Emails Received', value: stats.emailsRecv },
     { label: 'Meetings Booked', value: stats.meetingsBooked },
@@ -2671,8 +2501,6 @@ let lastRangeConfig = null;
 let loadSeq = 0;
 
 function renderAll() {
-  renderTodayCallsTable();
-
   if (!lastResults || !lastRangeConfig) return;
 
   const currentIds = getActiveOwnerIds();
@@ -2771,9 +2599,8 @@ document.getElementById('rangeTabs').addEventListener('click', ev => {
   if (!btn) return;
   const key = btn.getAttribute('data-range');
   // Always refetch, even if this tab is already active — it's the only way to
-  // manually refresh Team Comparison/Agent Focus/Trend data (Book Health and
-  // Today's Calls have their own explicit refresh links; this gives the main
-  // activity data the same).
+  // manually refresh Team Comparison/Agent Focus/Trend data (Book Health has
+  // its own explicit refresh; this gives the main activity data the same).
   loadAndRender(key);
 });
 
@@ -2819,8 +2646,6 @@ document.getElementById('customDatePickerEnd').addEventListener('change', ev => 
   customRangeEndStr = val;
   if (customRangeStartStr) loadAndRender('customRange');
 });
-
-document.getElementById('todayCallsRefreshBtn').addEventListener('click', () => { loadTodayCalls(); });
 
 document.getElementById('viewTabs').addEventListener('click', ev => {
   const btn = ev.target.closest('.view-tab');
@@ -2905,7 +2730,6 @@ renderRepFilterChips();
 renderActivityTypeChips();
 renderAgentPickerChips();
 loadAndRender('today');
-loadTodayCalls();
 loadTrendData();
 loadWeeklyTrendData();
 </script>
