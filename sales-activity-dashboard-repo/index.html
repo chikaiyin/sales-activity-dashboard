@@ -685,7 +685,22 @@ async function callHubSpotTool(args) {
   }
 }
 
-async function runQuery(sql) {
+// The Cowork host transparently caches tool calls with identical arguments —
+// great for cheap re-renders, but it means clicking "Reload data" while
+// asking the exact same SQL text as before just gets handed the same cached
+// response back, even though our own app-level cache was correctly bypassed.
+// Confirmed directly: every call after clicking Reload came back tagged
+// "cached": true in the debug log, Calls included, which is why Tom's count
+// stayed at 88 instead of picking up the 3 calls HubSpot had gained since.
+// Fix: when a cacheBust token is supplied, fold it into chatInsights.userIntent
+// (a real argument to the tool call, so it changes the call's identity)
+// rather than touching the SQL text itself, so the query semantics never
+// change — just make the platform see it as a genuinely new request.
+function withCacheBust(userIntent, cacheBust) {
+  return cacheBust ? `${userIntent} [reload:${cacheBust}]` : userIntent;
+}
+
+async function runQuery(sql, cacheBust) {
   let lastErr;
   for (let attempt = 0; attempt < 6; attempt++) {
     if (attempt > 0) await sleep(1500 * attempt + Math.random() * 400);
@@ -693,7 +708,7 @@ async function runQuery(sql) {
       sql,
       verbosityLevel: 'LOW',
       chatInsights: {
-        userIntent: 'Management dashboard: filterable team comparison and single-agent focus view over selectable ranges',
+        userIntent: withCacheBust('Management dashboard: filterable team comparison and single-agent focus view over selectable ranges', cacheBust),
         satisfaction: 'NEUTRAL'
       }
     });
@@ -719,12 +734,12 @@ async function runQuery(sql) {
 const PAGE_SIZE = 500;
 const MAX_PAGES = 20;
 
-async function runQueryAllPages(baseSql) {
+async function runQueryAllPages(baseSql, cacheBust) {
   let all = [];
   let offset = 0;
   let truncated = false;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const rows = await runQuery(`${baseSql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`);
+    const rows = await runQuery(`${baseSql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`, cacheBust);
     all = all.concat(rows);
     if (rows.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
@@ -762,7 +777,7 @@ function hubspotContactUrl(contactId) {
    Today/Yesterday/This Week, and best-effort for busier multi-day ranges:
    entries beyond the cap just render without a contact link rather than
    erroring. */
-async function runContactLinkQuery(sql) {
+async function runContactLinkQuery(sql, cacheBust) {
   let lastErr;
   for (let attempt = 0; attempt < 6; attempt++) {
     if (attempt > 0) await sleep(1500 * attempt + Math.random() * 400);
@@ -770,7 +785,7 @@ async function runContactLinkQuery(sql) {
       sql,
       verbosityLevel: 'LOW',
       chatInsights: {
-        userIntent: 'Management dashboard: resolve each logged call/email/meeting/note to its associated HubSpot contact record ID so names in the Activity Log can link to that contact',
+        userIntent: withCacheBust('Management dashboard: resolve each logged call/email/meeting/note to its associated HubSpot contact record ID so names in the Activity Log can link to that contact', cacheBust),
         satisfaction: 'NEUTRAL'
       }
     });
@@ -1075,9 +1090,14 @@ async function loadAll(rangeConfig, forceRefresh) {
   // instead of silently missing every meeting they created.
   const creatorFilter = `hs_created_by_user_id IN (${allCreatorIds().map(id => `'${id}'`).join(',')})`;
 
+  // See withCacheBust() above: the platform caches tool calls by their exact
+  // arguments, so a forced reload needs a token here to actually reach
+  // HubSpot again instead of getting the same cached answer back.
+  const bust = forceRefresh ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : null;
+
   const [callsRes, emailsRes, meetingsRes, notesRes, leadsRes, dealsRes, enquiriesRes] = await Promise.all([
-    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_call_title, hs_call_disposition, hs_call_duration, hs_timestamp FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
-    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_email_subject, hs_email_direction, hs_timestamp FROM EMAIL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_call_title, hs_call_disposition, hs_call_duration, hs_timestamp FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_email_subject, hs_email_direction, hs_timestamp FROM EMAIL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`, bust),
     // Meetings are date-filtered by hs_createdate — when the agent actually
     // did the booking — not hs_timestamp (which HubSpot sets to the
     // meeting's SCHEDULED start time). Those two dates are often days or
@@ -1087,11 +1107,11 @@ async function loadAll(rangeConfig, forceRefresh) {
     // it up, not when the meeting happens to occur — otherwise a meeting
     // booked today for next month wouldn't count until next month, and a
     // meeting booked last month for today would count now instead of then.
-    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_created_by_user_id, hs_meeting_title, hs_meeting_outcome, hs_timestamp, hs_createdate FROM MEETING WHERE ${creatorFilter} AND hs_createdate BETWEEN '${range.start}' AND '${range.end}'`),
-    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_note_body, hs_timestamp FROM NOTE WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
-    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, firstname, lastname, email, phone, lifecyclestage, hs_lead_status, createdate, notes_last_contacted FROM CONTACT WHERE ${ownerFilter} AND createdate BETWEEN '${range.start}' AND '${range.end}'`),
-    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, dealname, dealstage, hs_lastmodifieddate FROM DEAL WHERE ${ownerFilter} AND hs_lastmodifieddate BETWEEN '${range.start}' AND '${range.end}'`),
-    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hubspot_owner_assigneddate FROM CONTACT WHERE ${ownerFilter} AND hubspot_owner_assigneddate BETWEEN '${range.start}' AND '${range.end}'`)
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_created_by_user_id, hs_meeting_title, hs_meeting_outcome, hs_timestamp, hs_createdate FROM MEETING WHERE ${creatorFilter} AND hs_createdate BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hs_note_body, hs_timestamp FROM NOTE WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, firstname, lastname, email, phone, lifecyclestage, hs_lead_status, createdate, notes_last_contacted FROM CONTACT WHERE ${ownerFilter} AND createdate BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, dealname, dealstage, hs_lastmodifieddate FROM DEAL WHERE ${ownerFilter} AND hs_lastmodifieddate BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    runQueryAllPages(`SELECT hs_object_id, hubspot_owner_id, hubspot_owner_assigneddate FROM CONTACT WHERE ${ownerFilter} AND hubspot_owner_assigneddate BETWEEN '${range.start}' AND '${range.end}'`, bust)
   ]);
 
   const rawCalls = callsRes.rows, rawEmails = emailsRes.rows, rawMeetings = meetingsRes.rows,
@@ -1276,25 +1296,47 @@ async function loadTodayCalls() {
    Meeting/Note need this lookup. */
 let contactLinkMaps = { calls: new Map(), emails: new Map(), meetings: new Map(), notes: new Map() };
 
-async function loadContactLinks(rangeConfig) {
-  try {
-    const range = paddedSqlRange(rangeConfig);
-    const ownerIds = OWNERS.map(o => `'${o.id}'`).join(',');
-    const ownerFilter = `hubspot_owner_id IN (${ownerIds})`;
-    const creatorFilter = `hs_created_by_user_id IN (${allCreatorIds().map(id => `'${id}'`).join(',')})`;
+async function loadContactLinks(rangeConfig, forceRefresh) {
+  const range = paddedSqlRange(rangeConfig);
+  const ownerIds = OWNERS.map(o => `'${o.id}'`).join(',');
+  const ownerFilter = `hubspot_owner_id IN (${ownerIds})`;
+  const creatorFilter = `hs_created_by_user_id IN (${allCreatorIds().map(id => `'${id}'`).join(',')})`;
+  const bust = forceRefresh ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : null;
 
-    const [calls, emails, meetings, notes] = await Promise.all([
-      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
-      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM EMAIL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`),
-      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM MEETING WHERE ${creatorFilter} AND hs_createdate BETWEEN '${range.start}' AND '${range.end}'`),
-      runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM NOTE WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`)
-    ]);
-    contactLinkMaps = { calls, emails, meetings, notes };
-  } catch (err) {
-    // Best-effort only. If this fails for any reason, the Activity Log just
-    // renders without contact links rather than blocking anything else.
-    contactLinkMaps = { calls: new Map(), emails: new Map(), meetings: new Map(), notes: new Map() };
-  }
+  // Each engagement type's contact-link lookup is fetched independently with
+  // Promise.allSettled rather than Promise.all. Previously these four ran
+  // under a single Promise.all + try/catch: if EITHER of them failed (e.g.
+  // Meetings or Notes hitting some edge case), the whole batch was treated
+  // as failed and ALL FOUR maps — including Calls, even when the Calls query
+  // itself had already succeeded — got reset to empty in the catch block.
+  // That's the actual cause behind "Call rows never link to a contact" —
+  // confirmed the Calls join query works fine on its own; something else in
+  // the batch was failing and silently wiping out its result too. Now each
+  // type keeps whatever it successfully fetched, independent of the others.
+  const types = ['calls', 'emails', 'meetings', 'notes'];
+  const queries = [
+    () => runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM CALL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    () => runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM EMAIL WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    () => runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM MEETING WHERE ${creatorFilter} AND hs_createdate BETWEEN '${range.start}' AND '${range.end}'`, bust),
+    () => runContactLinkQuery(`SELECT hs_object_id, CONTACT.hs_object_id FROM NOTE WHERE ${ownerFilter} AND hs_timestamp BETWEEN '${range.start}' AND '${range.end}'`, bust)
+  ];
+
+  const settled = await Promise.allSettled(queries.map(fn => fn()));
+  const nextMaps = { calls: new Map(), emails: new Map(), meetings: new Map(), notes: new Map() };
+  settled.forEach((result, i) => {
+    const type = types[i];
+    if (result.status === 'fulfilled') {
+      nextMaps[type] = result.value;
+    } else {
+      // Keep whatever this type had before rather than blanking it, and log
+      // which one failed and why — this used to fail silently as part of a
+      // combined catch block.
+      nextMaps[type] = contactLinkMaps[type] || new Map();
+      console.log(`[contact-link debug] ${type} contact-link query failed, keeping previous map (size ${nextMaps[type].size}). Error:`, result.reason && result.reason.message ? result.reason.message : result.reason);
+    }
+  });
+  console.log('[contact-link debug] map sizes after load:', types.map(t => `${t}=${nextMaps[t].size}`).join(', '), 'rangeKey:', rangeConfig.key);
+  contactLinkMaps = nextMaps;
   renderAll();
 }
 
@@ -1603,17 +1645,35 @@ async function loadQualifiedBreakdown(ownerId) {
 const bookHealthCache = {};
 const bookHealthLoading = {};
 
+/* Overdue Tasks added per Kyle's request, then tightened per his follow-up:
+   a task only counts here if the TASK's own hubspot_owner_id matches this
+   rep AND the associated contact's hubspot_owner_id also matches this rep.
+   Confirmed directly this distinction is real, not theoretical: for Thomas
+   Murray, task-owner-only gave 107 overdue tasks, but adding the
+   CONTACT.hubspot_owner_id join dropped it to 100 — 7 of those tasks were
+   assigned to him on contacts actually owned by someone else (a handoff, or
+   a teammate assigning him a follow-up on their own contact). Kyle's ask was
+   specifically to exclude those: this metric is meant to reflect this rep's
+   own book falling behind, not tasks that happen to be assigned to them on
+   someone else's contact. "Overdue" = not COMPLETED and due date
+   (hs_timestamp) is before today; the 14+ day cut uses the same logic
+   against a cutoff 14 days back. Both are all-time/unbounded, same as the
+   rest of Book Health, not scoped to the range tabs above. */
 async function loadBookHealth(ownerId) {
   if (bookHealthCache[ownerId] || bookHealthLoading[ownerId]) return;
   bookHealthLoading[ownerId] = true;
   try {
     const meetingCreatorIds = [ownerId, ...(REP_CREATOR_ALIASES[ownerId] || [])];
     const meetingCreatorIn = meetingCreatorIds.map(id => `'${id}'`).join(',');
+    const todayStr = daysAgoStr(0);
+    const fourteenDaysAgoStr = daysAgoStr(14);
 
-    const [totalContacts, callEmailRes, noteMeetingRes] = await Promise.all([
+    const [totalContacts, callEmailRes, noteMeetingRes, overdueTasks, overdueTasks14] = await Promise.all([
       runSingleCountQuery(`SELECT COUNT(*) FROM CONTACT WHERE hubspot_owner_id = '${ownerId}'`),
       runQueryAllPages(`SELECT hs_object_id FROM CONTACT WHERE hubspot_owner_id = '${ownerId}' AND (CALL.hubspot_owner_id = '${ownerId}' OR EMAIL.hubspot_owner_id = '${ownerId}')`),
-      runQueryAllPages(`SELECT hs_object_id FROM CONTACT WHERE hubspot_owner_id = '${ownerId}' AND (NOTE.hubspot_owner_id = '${ownerId}' OR MEETING.hs_created_by_user_id IN (${meetingCreatorIn}))`)
+      runQueryAllPages(`SELECT hs_object_id FROM CONTACT WHERE hubspot_owner_id = '${ownerId}' AND (NOTE.hubspot_owner_id = '${ownerId}' OR MEETING.hs_created_by_user_id IN (${meetingCreatorIn}))`),
+      runSingleCountQuery(`SELECT COUNT(*) FROM TASK WHERE hubspot_owner_id = '${ownerId}' AND hs_task_status != 'COMPLETED' AND hs_timestamp < '${todayStr}' AND CONTACT.hubspot_owner_id = '${ownerId}'`),
+      runSingleCountQuery(`SELECT COUNT(*) FROM TASK WHERE hubspot_owner_id = '${ownerId}' AND hs_task_status != 'COMPLETED' AND hs_timestamp < '${fourteenDaysAgoStr}' AND CONTACT.hubspot_owner_id = '${ownerId}'`)
     ]);
 
     const touchedIds = new Set();
@@ -1624,7 +1684,7 @@ async function loadBookHealth(ownerId) {
     const untouched = Math.max(0, totalContacts - contacted);
     const truncated = callEmailRes.truncated || noteMeetingRes.truncated;
 
-    bookHealthCache[ownerId] = { totalContacts, contacted, untouched, truncated, error: null };
+    bookHealthCache[ownerId] = { totalContacts, contacted, untouched, truncated, overdueTasks, overdueTasks14, error: null };
   } catch (err) {
     bookHealthCache[ownerId] = { error: err && err.message ? err.message : String(err) };
   } finally {
@@ -1656,7 +1716,9 @@ function renderBookHealthGrid(ownerId) {
   grid.innerHTML = [
     { label: 'Total Contacts in Book', value: cached.totalContacts },
     { label: 'Contacted', value: cached.contacted, sub: `${contactedRate}% of book — by this rep` },
-    { label: 'Untouched', value: cached.untouched, sub: `${untouchedRate}% of book — zero footprint from this rep` }
+    { label: 'Untouched', value: cached.untouched, sub: `${untouchedRate}% of book — zero footprint from this rep` },
+    { label: 'Overdue Tasks', value: cached.overdueTasks, sub: 'not completed, due date has passed' },
+    { label: 'Overdue 14+ Days', value: cached.overdueTasks14, sub: 'not completed, due 14+ days ago' }
   ].map(c => `
     <div class="kpi-card">
       <div class="kpi-label">${escapeHtml(c.label)}</div>
@@ -1665,7 +1727,7 @@ function renderBookHealthGrid(ownerId) {
     </div>`).join('');
 
   caveat.textContent = (cached.truncated ? '⚠ Extremely large touched-contact set (10,000+) for at least one engagement type — counts could be a slight undercount. ' : '')
-    + '"Untouched" = zero Calls, Emails, Notes, or Meetings that THIS rep personally logged against the contact — a contact worked entirely by a teammate counts as untouched here, even if it\'s fully engaged by someone else. Meetings are matched by creator, not by owner, same as "Meetings Booked" elsewhere on this dashboard. Book size and touch status are both all-time, unbounded by the range tabs above.';
+    + '"Untouched" = zero Calls, Emails, Notes, or Meetings that THIS rep personally logged against the contact — a contact worked entirely by a teammate counts as untouched here, even if it\'s fully engaged by someone else. Meetings are matched by creator, not by owner, same as "Meetings Booked" elsewhere on this dashboard. "Overdue Tasks" only counts tasks where BOTH the task itself is assigned to this rep AND the associated contact is also owned by this rep — a task assigned to this rep on a contact actually owned by a teammate (e.g. a handoff) is deliberately excluded, since this is meant to reflect this rep\'s own book falling behind, not tasks that just happen to be assigned to them. Tasks marked Completed never count, regardless of due date. "Overdue 14+ Days" is the same, restricted to tasks overdue by two weeks or more. Book size, touch status, and overdue tasks are all all-time, unbounded by the range tabs above.';
 }
 
 /* ---------- Metrics ---------- */
@@ -2623,7 +2685,7 @@ async function loadAndRender(rangeKey, forceRefresh) {
   // Log's "View contact" links, so they shouldn't hold up the main KPI/table
   // render. renderAll() runs again inside loadContactLinks() once its own
   // fetch resolves, which fills the links in retroactively.
-  loadContactLinks(rangeConfigPreview);
+  loadContactLinks(rangeConfigPreview, forceRefresh);
 
   try {
     const rangeConfig = rangeConfigPreview;
