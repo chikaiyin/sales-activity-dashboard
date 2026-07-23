@@ -4,7 +4,7 @@
   "schemaVersion": 1,
   "description": "Management-facing sales activity dashboard for Amy, Sam, Kyle & Tim: a team comparison table (calls, connect rate, emails, meetings booked, meeting completion rate, new leads, notes) plus a trend chart with a metric selector, over Today/Yesterday/This Week/Last Week/This Month/Last Month ranges. Pulls fresh from HubSpot each time it's opened. No gamification — plain performance reporting.",
   "mcpTools": [
-    "mcp__fa06d9cc-b3b9-4e63-a33e-89af872b44ba__query_crm_data"
+    "mcp__6f7c9f0d-1060-4648-9326-75f7e51640a5__query_crm_data"
   ],
   "mcpServerNames": [
     "HubSpot"
@@ -515,7 +515,7 @@ function inAnySession(ts, rangeConfig) {
 
 /* ---------- HubSpot fetching (row-level queries) ---------- */
 
-const QUERY_TOOL = 'mcp__fa06d9cc-b3b9-4e63-a33e-89af872b44ba__query_crm_data';
+const QUERY_TOOL = 'mcp__6f7c9f0d-1060-4648-9326-75f7e51640a5__query_crm_data';
 
 /* Global concurrency limiter. Book Health alone can fan out to ~40 queries
    (9 reps × several per-owner metrics), plus the main activity fetch runs 7
@@ -559,9 +559,24 @@ function releaseQuerySlot() {
   if (next) next();
 }
 
+// The host injects window.cowork asynchronously; if a query fires before that
+// injection lands (e.g. right at page load), window.cowork is still undefined
+// and callMcpTool throws "Cannot read properties of undefined". Poll for it
+// instead of assuming it's already there.
+async function waitForCoworkBridge(timeoutMs = 15000) {
+  const start = Date.now();
+  while (!(window.cowork && typeof window.cowork.callMcpTool === 'function')) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('This dashboard did not connect to its host app in time (window.cowork unavailable). Reload the artifact — if this keeps happening, the page may be open outside the Cowork viewer.');
+    }
+    await sleep(100);
+  }
+}
+
 async function callHubSpotTool(args) {
   await acquireQuerySlot();
   try {
+    await waitForCoworkBridge();
     return await window.cowork.callMcpTool(QUERY_TOOL, args);
   } finally {
     releaseQuerySlot();
