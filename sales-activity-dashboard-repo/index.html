@@ -182,6 +182,7 @@
       <button class="range-tab view-tab" data-view="team">Team Overview</button>
       <button class="range-tab view-tab" data-view="agent">Sales Agent</button>
     </div>
+    <button type="button" class="refresh-link" id="reloadDataBtn" style="font-size:12.5px;">⟳ Reload data</button>
   </div>
 
   <div class="toolbar">
@@ -1060,8 +1061,8 @@ function writeRangeCache(rangeConfig, results, truncated) {
   }
 }
 
-async function loadAll(rangeConfig) {
-  const cached = readRangeCache(rangeConfig);
+async function loadAll(rangeConfig, forceRefresh) {
+  const cached = !forceRefresh && readRangeCache(rangeConfig);
   if (cached) {
     return { results: cached.results, truncated: cached.truncated, fromCache: true, cachedAt: cached.cachedAt };
   }
@@ -2556,6 +2557,19 @@ let currentRangeKey = 'today';
 let lastResults = null;
 let lastRangeConfig = null;
 
+// Guards against a stale response landing after a newer one. Each call to
+// loadAndRender() is its own async chain (several seconds of network calls);
+// switching range tabs quickly (e.g. Today -> Yesterday) starts a second
+// chain before the first one has resolved, and network timing isn't
+// guaranteed to match click order — the "Today" fetch can come back AFTER
+// the "Yesterday" fetch and silently overwrite it, leaving Yesterday's tab
+// highlighted active while Today's numbers sit on screen (Kyle's "stuck
+// loading today's" report). Every call bumps this counter and captures its
+// own number; when a fetch resolves, it only applies its results / touches
+// the loading bar if it's still the most recent call in flight — otherwise
+// it's stale and quietly discarded.
+let loadSeq = 0;
+
 function renderAll() {
   renderTodayCallsTable();
 
@@ -2580,8 +2594,9 @@ function renderAll() {
   }
 }
 
-async function loadAndRender(rangeKey) {
+async function loadAndRender(rangeKey, forceRefresh) {
   currentRangeKey = rangeKey;
+  const seq = ++loadSeq;
   document.querySelectorAll('.range-tab').forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-range') === rangeKey));
   document.getElementById('customDatePickerWrap').classList.toggle('active', rangeKey === 'custom' || rangeKey === 'customRange');
 
@@ -2593,7 +2608,7 @@ async function loadAndRender(rangeKey) {
   // local cache with no HubSpot queries at all — only show the loading bar
   // and countdown once we know we're actually about to fetch.
   const rangeConfigPreview = getRangeConfig(rangeKey);
-  const cacheHit = readRangeCache(rangeConfigPreview);
+  const cacheHit = !forceRefresh && readRangeCache(rangeConfigPreview);
   let countdownId = null;
   if (!cacheHit) {
     loadingBar.classList.add('active');
@@ -2612,7 +2627,15 @@ async function loadAndRender(rangeKey) {
 
   try {
     const rangeConfig = rangeConfigPreview;
-    const { results, truncated, fromCache, cachedAt } = await loadAll(rangeConfig);
+    const { results, truncated, fromCache, cachedAt } = await loadAll(rangeConfig, forceRefresh);
+
+    // A newer loadAndRender() call has started since this one began — e.g.
+    // the user clicked Yesterday, then Today, and THIS (Yesterday's) fetch
+    // happened to resolve last. Applying it now would silently overwrite the
+    // correct, newer data on screen. Bail out quietly; the newer call owns
+    // rendering, status text, and the loading bar from here.
+    if (seq !== loadSeq) return;
+
     rangeConfig.truncated = truncated;
 
     lastResults = results;
@@ -2626,6 +2649,7 @@ async function loadAndRender(rangeKey) {
       ? `Loaded ${totalActivities} logged activities across ${results.length} reps for "${rangeConfig.label}" from local cache (saved ${new Date(cachedAt).toLocaleString()}) — no HubSpot queries used, this period is finished and won't change.`
       : `Loaded ${totalActivities} logged activities across ${results.length} reps for "${rangeConfig.label}" as of ${new Date().toLocaleTimeString()}.`;
   } catch (err) {
+    if (seq !== loadSeq) return;
     stopCountdown(countdownId);
     if (isNotShownError(err)) {
       pendingRetryOnVisible.main = true;
@@ -2635,8 +2659,10 @@ async function loadAndRender(rangeKey) {
       statusEl.classList.add('error');
     }
   } finally {
-    stopCountdown(countdownId);
-    loadingBar.classList.remove('active');
+    if (seq === loadSeq) {
+      stopCountdown(countdownId);
+      loadingBar.classList.remove('active');
+    }
   }
 }
 
@@ -2649,6 +2675,16 @@ document.getElementById('rangeTabs').addEventListener('click', ev => {
   // Today's Calls have their own explicit refresh links; this gives the main
   // activity data the same).
   loadAndRender(key);
+});
+
+// Manual "Reload data" button — re-runs the currently selected range,
+// bypassing local cache even if this range would normally be served from it,
+// so it always goes back to HubSpot live. Exists for the same reason as the
+// race-condition fix above: if a load ever looks stuck (or Kyle just wants a
+// guaranteed-fresh pull), this is a one-click way to force it rather than
+// hunting for the right tab to re-click.
+document.getElementById('reloadDataBtn').addEventListener('click', () => {
+  loadAndRender(currentRangeKey, true);
 });
 
 document.getElementById('customRangeToggle').addEventListener('change', ev => {
@@ -2739,8 +2775,19 @@ function fallbackCopy(text) {
 
 document.body.addEventListener('click', ev => {
   const el = ev.target.closest('.contact-link');
-  if (!el) return;
+  if (!el) {
+    // Temporary diagnostic: Kyle reported clicking a contact link does
+    // nothing. Log every click's target so we can see, from the debug log,
+    // whether clicks on a name are even landing on a .contact-link element
+    // at all (vs. landing on a parent <td> because the span didn't render,
+    // or the link never got its contactId resolved in time).
+    if (ev.target && ev.target.closest && ev.target.closest('#activityLogTable')) {
+      console.log('[contact-link debug] click inside Activity Log did NOT hit a .contact-link element. target tag:', ev.target.tagName, 'class:', ev.target.className, 'text:', (ev.target.textContent || '').slice(0, 60));
+    }
+    return;
+  }
   const url = el.getAttribute('data-contact-url');
+  console.log('[contact-link debug] .contact-link clicked. url:', url, 'hasClipboardApi:', !!(navigator.clipboard && navigator.clipboard.writeText));
   if (!url) return;
   copyToClipboard(url);
   showToast('HubSpot link copied — paste it into a browser tab to open');
